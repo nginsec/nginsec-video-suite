@@ -182,7 +182,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 **Built & maintained by**
 
-[![nginsec](https://img.shields.io/badge/github-nginsec-06b6d4?style=for-the-badge&logo=github)](https://github.com/nginsec)
+[![nginsec](https://img.shields.io/badge/github-nginsec-06b6d4?style=for-the-badge&logo=github)](https://github.com/nginsec/nginsec)
 
 *nginsec Video Cloud Suite · Secure Video Retrieval System*
 
