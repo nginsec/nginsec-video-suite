@@ -232,7 +232,7 @@ class DownloadManager:
             opts['progress_hooks']     = [self._progress_hook]
             opts['format']             = self._get_format_string(quality)
             opts['merge_output_format']= 'mp4'
-            opts['extractor_args']     = {'youtube': {'player_client': ['ios', 'web']}}
+            opts['extractor_args']     = {'youtube': {'player_client': ['tv_embedded', 'mweb']}}
 
             # Clip extraction
             if clip_start or clip_end:
