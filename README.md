@@ -16,163 +16,210 @@
 
 ---
 
-## Overview
-
-**nginsec Video Cloud Suite** is a dual-mode YouTube downloader — a **desktop GUI app** (CustomTkinter) and a **self-hosted web app** (Flask + Socket.io) that can be shared publicly via Ngrok. Both modes are powered by yt-dlp and FFmpeg, supporting up to 4K video and 320 kbps MP3 audio.
+## 🇹🇷 Kurulum (Türkçe) · 🇬🇧 Setup (English) → [aşağıda / below](#-kurulum--setup)
 
 ---
 
-## Features
+## Özellikler / Features
 
-| Feature | Desktop | Web |
+| Özellik / Feature | Desktop | Web |
 |---|:---:|:---:|
-| 4K / 1080p / 720p video | ✓ | ✓ |
-| MP3 320 kbps audio extraction | ✓ | ✓ |
-| Real-time progress bar | ✓ | ✓ (Socket.io) |
-| Password / access key protection | — | ✓ |
-| Shareable via Ngrok | — | ✓ |
-| Thumbnail + metadata download | ✓ | — |
-| Dark-themed UI | ✓ | ✓ |
+| 4K / 1080p / 720p video indirme | ✓ | ✓ |
+| MP3 320 kbps ses çıkarma | ✓ | ✓ |
+| Gerçek zamanlı ilerleme çubuğu | ✓ | ✓ (Socket.io) |
+| Şifreli erişim (Access Key) | — | ✓ |
+| Ngrok ile paylaşım | — | ✓ |
+| Thumbnail + metadata indirme | ✓ | — |
+| Karanlık tema arayüz | ✓ | ✓ |
 
 ---
 
-## Project Structure
+## Proje Yapısı / Project Structure
 
 ```
 nginsec-video-suite/
 │
-├── main.py                 # Desktop app entry point
+├── main.py                 # Desktop başlangıç noktası / entry point
 ├── ui.py                   # CustomTkinter GUI
-├── download_manager.py     # yt-dlp download engine
-├── config.py               # App configuration & constants
-├── requirements.txt        # Desktop dependencies
+├── download_manager.py     # yt-dlp motoru / engine
+├── config.py               # Ayarlar / configuration
+├── requirements.txt        # Desktop bağımlılıkları / dependencies
 │
-└── web/                    # Web Edition
+├── setup.bat               # Windows kurulum scripti / setup script
+├── setup.sh                # macOS/Linux kurulum scripti / setup script
+│
+└── web/                    # Web Sürümü / Web Edition
     ├── app.py              # Flask + Socket.io backend
-    ├── requirements.txt    # Web dependencies
+    ├── requirements.txt    # Web bağımlılıkları / dependencies
     └── templates/
-        └── index.html      # Dark-themed SPA frontend
+        └── index.html      # Dark-theme SPA frontend
 ```
 
 ---
 
-## Quick Start
+## 🚀 Kurulum / Setup
 
-### Desktop App
+### ⚡ Tek Komutla Otomatik Kurulum / One-Command Auto Setup
+
+> **Windows** — Sadece çift tıkla / Just double-click:
+> ```
+> setup.bat
+> ```
+
+> **macOS / Linux** — Terminalde çalıştır / Run in terminal:
+> ```bash
+> chmod +x setup.sh && ./setup.sh
+> ```
+
+Script şunları otomatik yapar / The script automatically:
+- ✅ Python sürümünü kontrol eder / Checks Python version
+- ✅ Sanal ortam (`.venv`) oluşturur / Creates virtual environment
+- ✅ Tüm bağımlılıkları kurar / Installs all dependencies
+- ✅ FFmpeg'i kurar (yoksa) / Installs FFmpeg (if missing)
+- ✅ Başlatma komutlarını gösterir / Shows start commands
+
+---
+
+### 📋 Manuel Kurulum / Manual Setup
+
+**Gereksinimler / Requirements:**
+- Python 3.8 veya üstü / Python 3.8 or higher → [python.org](https://www.python.org/downloads/)
+- FFmpeg → `winget install Gyan.FFmpeg` (Windows) · `brew install ffmpeg` (Mac) · `sudo apt install ffmpeg` (Linux)
+- Git → [git-scm.com](https://git-scm.com)
 
 ```bash
-# 1. Install Python dependencies
-pip install -r requirements.txt
+# 1. Repoyu klonla / Clone the repo
+git clone https://github.com/nginsec/nginsec-video-suite.git
+cd nginsec-video-suite
 
-# 2. Install FFmpeg  (required for 1080p+)
-winget install Gyan.FFmpeg        # Windows
-brew install ffmpeg               # macOS
-sudo apt install ffmpeg           # Linux
+# 2. Sanal ortam oluştur / Create virtual environment
+python -m venv .venv
 
-# 3. Launch
+# Windows
+.venv\Scripts\activate
+
+# macOS / Linux
+source .venv/bin/activate
+
+# 3. Bağımlılıkları kur / Install dependencies
+pip install -r requirements.txt          # Desktop
+pip install -r web/requirements.txt      # Web Edition
+```
+
+---
+
+## ▶️ Kullanım / Usage
+
+### Masa Üstü Uygulaması / Desktop App
+
+```bash
+# Sanal ortamı etkinleştir / Activate virtual environment
+.venv\Scripts\activate        # Windows
+source .venv/bin/activate     # macOS/Linux
+
 python main.py
 ```
 
-### Web Edition (local + Ngrok)
+1. YouTube URL'sini yapıştır / Paste the YouTube URL
+2. **"Fetch Video Info"** butonuna tıkla / Click **"Fetch Video Info"**
+3. Kalite seç / Select quality (4K, 1080p, 720p… veya MP3)
+4. **"Download Video"** veya **"Download Audio (MP3)"** tıkla
+5. Dosyalar şuraya kaydedilir / Files saved to: `~/Downloads/nginsec_downloads/`
+
+---
+
+### Web Uygulaması / Web App
 
 ```bash
+# Sanal ortamı etkinleştir / Activate virtual environment
+.venv\Scripts\activate        # Windows
+source .venv/bin/activate     # macOS/Linux
+
 cd web
-
-# 1. Install dependencies
-pip install -r requirements.txt
-
-# 2. Configure your access key (optional)
-cp ../.env.example .env
-# Edit .env → set ACCESS_KEY=your_secret
-
-# 3. Start server
 python app.py
-# → http://localhost:5000   (default key: nginsec2024)
+```
 
-# 4. Share via Ngrok
+Tarayıcıda aç / Open browser: **http://localhost:5000**
+
+**Varsayılan şifre / Default password:** `nginsec2024`
+
+> Şifreyi değiştirmek için / To change the password:
+> ```bash
+> # Başlatırken / At startup:
+> ACCESS_KEY=yeni_sifre python app.py      # macOS/Linux
+> $env:ACCESS_KEY="yeni_sifre"; python app.py   # Windows PowerShell
+> ```
+
+---
+
+### 🌐 Ngrok ile Paylaşım / Share via Ngrok
+
+Arkadaşınla paylaşmak için / To share with your friend:
+
+```bash
+# 1. Web uygulamasını başlat / Start the web app
+python web/app.py
+
+# 2. Yeni bir terminal aç ve Ngrok'u çalıştır / Open new terminal and run Ngrok
 ngrok http 5000
 ```
 
----
+Ngrok çıktısındaki `https://xxxx.ngrok.io` linkini paylaş.  
+Share the `https://xxxx.ngrok.io` link from the Ngrok output.
 
-## Web Edition — Screenshots
-
-> Dark-themed single-page app with real-time Socket.io progress.
-
-- **Auth gate** — password-protected entry, no page reload
-- **Video info** — thumbnail, title, uploader, views, duration loaded via AJAX
-- **Format picker** — dynamically populated from available resolutions (240p → 4K + MP3)
-- **Live progress** — animated gradient bar with speed / ETA / downloaded stats
-- **Save file** — direct browser download after server-side processing
+> Arkadaşın bu linke girdiğinde şifreyi isteyecek.  
+> Your friend will be prompted for the access key when visiting the link.
 
 ---
 
-## Configuration
+## ⚙️ Yapılandırma / Configuration
 
-### Change web access key
-
-```bash
-# Option A — environment variable (recommended)
-ACCESS_KEY=mySecretKey python web/app.py
-
-# Option B — edit web/app.py directly
-SYSTEM_ACCESS_KEY = 'mySecretKey'
-```
-
-### Desktop output folders
-
-Edit `config.py`:
+### Masa Üstü — `config.py`
 
 ```python
-OUTPUT_DIR   = Path.home() / "Downloads" / "nginsec_downloads"
+# Çıktı klasörleri / Output directories
+OUTPUT_DIR    = Path.home() / "Downloads" / "nginsec_downloads"
 DOWNLOADS_DIR = OUTPUT_DIR / "videos"
 MUSIC_DIR     = OUTPUT_DIR / "music"
+
+# Pencere boyutu / Window size
+WINDOW_WIDTH  = 1200
+WINDOW_HEIGHT = 750
 ```
 
----
+### Web — Ortam değişkenleri / Environment variables
 
-## Dependencies
-
-### Desktop (`requirements.txt`)
-| Package | Purpose |
-|---|---|
-| yt-dlp | Download engine |
-| customtkinter | Modern dark GUI |
-| Pillow | Image handling |
-| requests | HTTP client |
-
-### Web (`web/requirements.txt`)
-| Package | Purpose |
-|---|---|
-| flask | Web framework |
-| flask-socketio | Real-time progress |
-| yt-dlp | Download engine |
-
-> **FFmpeg** must be installed and on PATH for both editions.
-
----
-
-## Troubleshooting
-
-| Error | Cause | Fix |
+| Değişken / Variable | Varsayılan / Default | Açıklama / Description |
 |---|---|---|
-| `ffmpeg is not installed` | FFmpeg missing | `winget install Gyan.FFmpeg` |
-| `No module named 'yt_dlp'` | Missing dependencies | `pip install -r requirements.txt` |
-| `ModuleNotFoundError: customtkinter` | Desktop deps missing | `pip install customtkinter` |
-| `Unauthorized` (web) | Wrong access key | Check your `ACCESS_KEY` env var |
-| Slow 4K download | Normal — large file | Wait, or choose 1080p |
+| `ACCESS_KEY` | `nginsec2024` | Web arayüz şifresi / UI password |
+| `SECRET_KEY` | *(dahili / internal)* | Flask session şifresi |
 
 ---
 
-## Legal Notice
+## 🛠️ Sorun Giderme / Troubleshooting
 
-This tool is for **personal and educational use only**.  
-Respect copyright laws and YouTube's Terms of Service.  
-Do not use for redistribution of copyrighted content.
+| Hata / Error | Neden / Cause | Çözüm / Fix |
+|---|---|---|
+| `ffmpeg is not installed` | FFmpeg yok / missing | `winget install Gyan.FFmpeg` |
+| `No module named 'yt_dlp'` | Bağımlılık eksik | `pip install -r requirements.txt` |
+| `No module named 'customtkinter'` | Bağımlılık eksik | `pip install customtkinter` |
+| `Unauthorized` (web) | Yanlış şifre / Wrong key | `ACCESS_KEY` env değişkenini kontrol et |
+| İndirme çok yavaş / Slow download | Normal — büyük dosya | Bekle veya düşük kalite seç (1080p) |
+| `Error: requested merging but ffmpeg not installed` | FFmpeg PATH'te yok | Terminali yeniden başlat, FFmpeg'i yeniden kur |
 
 ---
 
-## License
+## ⚖️ Yasal Uyarı / Legal Notice
+
+Bu araç yalnızca **kişisel ve eğitim amaçlıdır**.  
+This tool is for **personal and educational use only**.
+
+Telif hakkı yasalarına ve YouTube Hizmet Şartlarına saygı gösterin.  
+Respect copyright laws and YouTube's Terms of Service.
+
+---
+
+## 📝 Lisans / License
 
 MIT License — see [LICENSE](LICENSE) for details.
 
@@ -182,7 +229,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 **Built & maintained by**
 
-[![nginsec](https://img.shields.io/badge/github-nginsec-06b6d4?style=for-the-badge&logo=github)](https://github.com/nginsec/nginsec)
+[![nginsec](https://img.shields.io/badge/github-nginsec-06b6d4?style=for-the-badge&logo=github)](https://github.com/nginsec/nginsec-video-suite)
 
 *nginsec Video Cloud Suite · Secure Video Retrieval System*
 
