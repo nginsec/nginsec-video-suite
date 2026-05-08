@@ -232,7 +232,7 @@ class DownloadManager:
             opts['progress_hooks']     = [self._progress_hook]
             opts['format']             = self._get_format_string(quality)
             opts['merge_output_format']= 'mp4'
-            opts['extractor_args']     = {'youtube': {'player_client': ['tv_embedded', 'mweb']}}
+            opts['cookiesfrombrowser'] = ('edge',)
 
             # Clip extraction
             if clip_start or clip_end:
@@ -308,7 +308,7 @@ class DownloadManager:
             opts['outtmpl']        = out_tpl
             opts['progress_hooks'] = [self._progress_hook]
             opts['format']         = 'bestaudio/best'
-            opts['extractor_args'] = {'youtube': {'player_client': ['ios', 'web']}}
+            opts['cookiesfrombrowser'] = ('edge',)
             opts['postprocessors'] = [{
                 'key':              'FFmpegExtractAudio',
                 'preferredcodec':   'mp3',
