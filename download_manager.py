@@ -2,6 +2,8 @@
 Download Manager v2 — yt-dlp engine with history, queue, clip, subtitles, multi-platform
 """
 import json
+import os
+import shutil
 import sqlite3
 import logging
 import threading
@@ -20,6 +22,31 @@ from config import (
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
 logger = logging.getLogger(__name__)
+
+
+# ── Node.js detection ─────────────────────────────────────────────────────────
+
+def _find_node() -> str:
+    """Find Node.js executable — checks PATH then common Windows install dirs."""
+    found = shutil.which('node') or shutil.which('node.exe')
+    if found:
+        return found
+    candidates = [
+        r'C:\Program Files\nodejs\node.exe',
+        r'C:\Program Files (x86)\nodejs\node.exe',
+        os.path.expanduser(r'~\AppData\Local\Programs\nodejs\node.exe'),
+        os.path.expanduser(r'~\AppData\Roaming\nvm\current\node.exe'),
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return ''
+
+_NODE = _find_node()
+if _NODE:
+    logger.info(f'Node.js found: {_NODE}')
+else:
+    logger.warning('Node.js not found — YouTube may have limited formats')
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -233,6 +260,8 @@ class DownloadManager:
             opts['format']             = self._get_format_string(quality)
             opts['merge_output_format']= 'mp4'
             opts['http_headers']       = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'}
+            if _NODE:
+                opts['js_runtimes'] = f'node:{_NODE}'
 
             # Clip extraction
             if clip_start or clip_end:
@@ -309,6 +338,8 @@ class DownloadManager:
             opts['progress_hooks'] = [self._progress_hook]
             opts['format']         = 'bestaudio/best'
             opts['http_headers']       = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'}
+            if _NODE:
+                opts['js_runtimes'] = f'node:{_NODE}'
             opts['postprocessors'] = [{
                 'key':              'FFmpegExtractAudio',
                 'preferredcodec':   'mp3',
