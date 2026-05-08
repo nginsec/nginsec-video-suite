@@ -232,7 +232,7 @@ class DownloadManager:
             opts['progress_hooks']     = [self._progress_hook]
             opts['format']             = self._get_format_string(quality)
             opts['merge_output_format']= 'mp4'
-            opts['cookiesfrombrowser'] = ('edge',)
+            opts['http_headers']       = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'}
 
             # Clip extraction
             if clip_start or clip_end:
@@ -308,7 +308,7 @@ class DownloadManager:
             opts['outtmpl']        = out_tpl
             opts['progress_hooks'] = [self._progress_hook]
             opts['format']         = 'bestaudio/best'
-            opts['cookiesfrombrowser'] = ('edge',)
+            opts['http_headers']       = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'}
             opts['postprocessors'] = [{
                 'key':              'FFmpegExtractAudio',
                 'preferredcodec':   'mp3',
