@@ -218,15 +218,22 @@ class DownloadManager:
     # ── Format string ──────────────────────────────────────────────────────────
 
     def _get_format_string(self, quality: str) -> str:
-        mapping = {
-            "4K (2160p)":      "bestvideo[height<=2160]+bestaudio/best",
-            "1080p (Full HD)": "bestvideo[height<=1080]+bestaudio/best",
-            "720p (HD)":       "bestvideo[height<=720]+bestaudio/best",
-            "480p":            "bestvideo[height<=480]+bestaudio/best",
-            "360p":            "bestvideo[height<=360]+bestaudio/best",
-            "240p":            "bestvideo[height<=240]+bestaudio/best",
+        heights = {
+            "4K (2160p)":      2160,
+            "1080p (Full HD)": 1080,
+            "720p (HD)":       720,
+            "480p":            480,
+            "360p":            360,
+            "240p":            240,
         }
-        return mapping.get(quality, "bestvideo+bestaudio/best")
+        h = heights.get(quality, 1080)
+        # Prefer H.264 (avc1) — avoids VP9/AV1 DASH streams that get 403
+        return (
+            f"bestvideo[vcodec^=avc1][height<={h}]+bestaudio[acodec^=mp4a]"
+            f"/bestvideo[vcodec^=avc1][height<={h}]+bestaudio"
+            f"/bestvideo[height<={h}]+bestaudio"
+            f"/best[height<={h}]/best"
+        )
 
     # ── Download video ─────────────────────────────────────────────────────────
 
