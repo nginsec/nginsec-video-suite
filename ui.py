@@ -573,6 +573,8 @@ class NginsecApp(ctk.CTk):
         clip_e  = self._clip_end.get().strip()
         subs    = self._embed_subs_var.get()
 
+        self._last_download_args = (url, quality, clip_s, clip_e, subs)
+
         def _run():
             self.dm.download_video(url, quality, clip_s, clip_e, subs)
             if self._meta_var.get() and self._video_info:
@@ -663,12 +665,13 @@ class NginsecApp(ctk.CTk):
         elif status == 'error':
             self._prog_bar.set(0)
             self._prog_pct.configure(text='')
-            self._prog_status.configure(
-                text=d.get('error', 'Error'),
-                text_color=COLORS['error'],
-            )
+            err_msg = d.get('error', 'Error')
+            self._prog_status.configure(text=err_msg, text_color=COLORS['error'])
             self._set_buttons_downloading(False)
-            self._close_oauth2_dialog()
+            # Only close OAuth2 dialog if the error is NOT auth-related
+            # so the user still has time to complete the Google device-code flow
+            if 'oauth2' not in err_msg.lower() and 'sign in' not in err_msg.lower():
+                self._close_oauth2_dialog()
 
     def _show_oauth2_dialog(self, message: str):
         """Show (or update) the OAuth2 setup popup when yt-dlp needs authentication."""
@@ -833,8 +836,9 @@ class _OAuth2Dialog(ctk.CTkToplevel):
 
     def __init__(self, parent, first_message: str):
         super().__init__(parent)
+        self._parent_app = parent
         self.title('YouTube Authentication')
-        self.geometry('520x340')
+        self.geometry('520x360')
         self.resizable(False, False)
         self.configure(fg_color='#0d1117')
         self.lift()
@@ -863,15 +867,25 @@ class _OAuth2Dialog(ctk.CTkToplevel):
         self._textbox.pack(fill='x', padx=20, pady=(0, 10))
         self._textbox.insert('end', message + '\n')
 
+        btn_row = ctk.CTkFrame(self, fg_color='transparent')
+        btn_row.pack(pady=(0, 6))
+
         self._open_btn = ctk.CTkButton(
-            self, text='Tarayıcıda Aç', height=34,
+            btn_row, text='Tarayıcıda Aç', height=34, width=160,
             fg_color='#238636', hover_color='#2ea043',
             command=self._open_browser,
         )
-        self._open_btn.pack(pady=(0, 6))
+        self._open_btn.pack(side='left', padx=(0, 8))
+
+        self._retry_btn = ctk.CTkButton(
+            btn_row, text='Giriş Yaptım, Tekrar Dene', height=34, width=200,
+            fg_color='#1f6feb', hover_color='#388bfd',
+            command=self._retry,
+        )
+        self._retry_btn.pack(side='left')
 
         ctk.CTkLabel(
-            self, text='Tarayıcıda kodu girin → bu pencere otomatik kapanır.',
+            self, text='Kodu tarayıcıda girin → "Giriş Yaptım, Tekrar Dene" butonuna basın.',
             font=('Segoe UI', 10), text_color='#8b949e',
         ).pack()
 
@@ -893,3 +907,15 @@ class _OAuth2Dialog(ctk.CTkToplevel):
         if self._url:
             import webbrowser
             webbrowser.open(self._url)
+
+    def _retry(self):
+        """User completed OAuth2 in browser — re-trigger the last download."""
+        self.destroy()
+        # Re-attempt download via the parent app's last URL
+        try:
+            app = self._parent_app
+            if hasattr(app, '_last_download_args') and app._last_download_args:
+                args = app._last_download_args
+                app.dm.download_video(*args)
+        except Exception:
+            pass

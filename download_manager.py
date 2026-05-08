@@ -78,6 +78,50 @@ else:
 
 _SESSION_COOKIES_PATH: str = ''   # cached for the process lifetime
 
+_OAUTH2_TOKEN_PATHS = [
+    Path(os.environ.get('APPDATA', '~')) / 'yt-dlp' / 'youtube-oauth2.token.json',
+    Path.home() / '.config' / 'yt-dlp' / 'youtube-oauth2.token.json',
+    Path.home() / '.cache'  / 'yt-dlp' / 'youtube-oauth2.token.json',
+]
+
+
+def _clear_stale_oauth2_token() -> None:
+    """Delete any cached OAuth2 token so yt-dlp-youtube-oauth2 starts a fresh device-code flow."""
+    for p in _OAUTH2_TOKEN_PATHS:
+        try:
+            if p.exists():
+                p.unlink()
+                logger.info(f'Cleared stale OAuth2 token: {p}')
+        except Exception:
+            pass
+
+
+def _ytdlp_browser_cookies(browser: str) -> str:
+    """
+    Try yt-dlp's built-in cookie extraction for the given browser.
+    Works for Opera/Edge (regular DPAPI); Chrome 127+ may still fail (ABE).
+    Returns path to temp Netscape file, or '' on failure.
+    """
+    tmp_path = str(Path(__file__).parent / f'_auto_{browser}_cookies.txt')
+    try:
+        opts = {
+            'quiet':              True,
+            'no_warnings':        True,
+            'cookiesfrombrowser': (browser,),
+            'cookiefile':         tmp_path,
+        }
+        with yt_dlp.YoutubeDL(opts):
+            pass   # __exit__ flushes cookie jar to tmp_path
+
+        if Path(tmp_path).exists() and Path(tmp_path).stat().st_size > 300:
+            logger.info(f'yt-dlp {browser} cookies: {Path(tmp_path).stat().st_size} bytes')
+            return tmp_path
+        Path(tmp_path).unlink(missing_ok=True)
+    except Exception as e:
+        logger.debug(f'yt-dlp {browser} cookie extract: {e}')
+        Path(tmp_path).unlink(missing_ok=True)
+    return ''
+
 
 def _rookiepy_export() -> str:
     """
@@ -163,12 +207,20 @@ def _add_browser_cookies(opts: dict) -> None:
         logger.info('Auth: auto-extracted browser cookies')
         return
 
-    # 4. OAuth2 device-code flow (yt-dlp-youtube-oauth2 plugin)
-    #    First run: shows "open google.com/device, enter XXXX" → user authenticates once.
-    #    All subsequent runs: uses cached token automatically — no interaction needed.
+    # 4. yt-dlp built-in browser extraction (Opera/Edge work; Chrome 127+ may still fail)
+    for browser in ('opera', 'edge', 'chrome'):
+        path = _ytdlp_browser_cookies(browser)
+        if path:
+            _SESSION_COOKIES_PATH = path
+            opts['cookiefile'] = path
+            logger.info(f'Auth: yt-dlp {browser} cookies')
+            return
+
+    # 5. OAuth2 device-code flow — last resort; clears stale token first
+    _clear_stale_oauth2_token()
     opts['username'] = 'oauth2'
     opts['password'] = ''
-    logger.info('Auth: OAuth2 (one-time setup if not yet authenticated)')
+    logger.info('Auth: OAuth2 (one-time Google login required)')
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
