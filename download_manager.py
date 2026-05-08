@@ -156,7 +156,10 @@ class DownloadManager:
 
     def get_video_info(self, url: str) -> Optional[Dict]:
         try:
-            with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True}) as ydl:
+            with yt_dlp.YoutubeDL({
+                'quiet': True, 'no_warnings': True,
+                'extractor_args': {'youtube': {'player_client': ['ios', 'web']}},
+            }) as ydl:
                 info = ydl.extract_info(url, download=False)
             return self._format_video_info(info)
         except Exception as e:
@@ -232,6 +235,7 @@ class DownloadManager:
             opts['progress_hooks']     = [self._progress_hook]
             opts['format']             = self._get_format_string(quality)
             opts['merge_output_format']= 'mp4'
+            opts['extractor_args']     = {'youtube': {'player_client': ['ios', 'web']}}
 
             # Clip extraction
             if clip_start or clip_end:
@@ -307,6 +311,7 @@ class DownloadManager:
             opts['outtmpl']        = out_tpl
             opts['progress_hooks'] = [self._progress_hook]
             opts['format']         = 'bestaudio/best'
+            opts['extractor_args'] = {'youtube': {'player_client': ['ios', 'web']}}
             opts['postprocessors'] = [{
                 'key':              'FFmpegExtractAudio',
                 'preferredcodec':   'mp3',
