@@ -513,6 +513,50 @@ class NginsecApp(ctk.CTk):
             text_color='#0d1117', font=FONT_SMALL, height=32, width=110,
         ).pack(anchor='w', padx=14, pady=(0, 12))
 
+        # ── YouTube Authentication card ────────────────────────────────────────
+        auth_card = self._card(p, 'YouTube Authentication')
+
+        cookies_path = Path(__file__).parent / 'cookies.txt'
+        has_cookies  = cookies_path.exists() and cookies_path.stat().st_size > 100
+
+        self._cookie_status_lbl = ctk.CTkLabel(
+            auth_card,
+            text=('✓ cookies.txt mevcut — YouTube indirmeleri aktif'
+                  if has_cookies else
+                  '✗ cookies.txt bulunamadı — kısıtlı videolar için gerekli'),
+            font=FONT_SMALL,
+            text_color=COLORS['success'] if has_cookies else COLORS['warning'],
+        )
+        self._cookie_status_lbl.pack(anchor='w', padx=14, pady=(6, 4))
+
+        ctk.CTkLabel(
+            auth_card,
+            text=('1. Chrome\'a "Get cookies.txt LOCALLY" eklentisini yükle\n'
+                  '2. YouTube.com\'a git (giriş yapılı)\n'
+                  '3. Eklenti simgesine tıkla → "For this Tab" → Export\n'
+                  '4. İndirilen dosyayı aşağıdaki butona tıklayarak seç'),
+            font=FONT_SMALL, text_color=COLORS['text_secondary'], justify='left',
+        ).pack(anchor='w', padx=14, pady=(0, 8))
+
+        btn_row = ctk.CTkFrame(auth_card, fg_color='transparent')
+        btn_row.pack(anchor='w', padx=14, pady=(0, 14))
+
+        ctk.CTkButton(
+            btn_row, text='Eklentiyi Aç (Chrome)',
+            command=lambda: __import__('webbrowser').open(
+                'https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc'
+            ),
+            fg_color=COLORS['accent'], hover_color=COLORS['accent_hover'],
+            text_color='#0d1117', font=FONT_SMALL, height=32, width=170,
+        ).pack(side='left', padx=(0, 8))
+
+        ctk.CTkButton(
+            btn_row, text='cookies.txt Dosyasını Seç',
+            command=self._pick_cookies_file,
+            fg_color='#238636', hover_color='#2ea043',
+            font=FONT_SMALL, height=32, width=190,
+        ).pack(side='left')
+
         about_card = self._card(p, 'About')
         ctk.CTkLabel(
             about_card,
@@ -672,6 +716,27 @@ class NginsecApp(ctk.CTk):
             # so the user still has time to complete the Google device-code flow
             if 'oauth2' not in err_msg.lower() and 'sign in' not in err_msg.lower():
                 self._close_oauth2_dialog()
+
+    def _pick_cookies_file(self):
+        """File picker — user selects exported cookies.txt, app copies it to project root."""
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            title='cookies.txt dosyasını seç',
+            filetypes=[('Cookies file', '*.txt'), ('All files', '*.*')],
+        )
+        if not path:
+            return
+        import shutil
+        dest = Path(__file__).parent / 'cookies.txt'
+        shutil.copy2(path, dest)
+        # Also reset the session cache so new cookies are used immediately
+        import download_manager as _dm
+        _dm._SESSION_COOKIES_PATH = ''
+        self._cookie_status_lbl.configure(
+            text='✓ cookies.txt yüklendi — artık tüm videolar inebilir',
+            text_color=COLORS['success'],
+        )
+        messagebox.showinfo('Başarılı', 'cookies.txt kaydedildi.\nArtık indirme butonuna bas.')
 
     def _show_oauth2_dialog(self, message: str):
         """Show (or update) the OAuth2 setup popup when yt-dlp needs authentication."""

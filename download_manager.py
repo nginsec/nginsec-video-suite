@@ -216,10 +216,10 @@ def _add_browser_cookies(opts: dict) -> None:
             logger.info(f'Auth: yt-dlp {browser} cookies')
             return
 
-    # 5. OAuth2 — use cached token silently if available; device-code only first time
-    opts['username'] = 'oauth2'
-    opts['password'] = ''
-    logger.info('Auth: OAuth2 (cached token or one-time Google login)')
+    # 5. Last resort — alternative player client (works for public/non-restricted videos)
+    opts.setdefault('extractor_args', {})
+    opts['extractor_args']['youtube'] = {'player_client': ['web_creator', 'tv_embedded']}
+    logger.info('Auth: web_creator client (no cookies — restricted videos may fail)')
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -478,19 +478,16 @@ class DownloadManager:
                 title = _run_download(opts)
             except Exception as first_err:
                 err_s = str(first_err)
-                is_auth = any(x in err_s for x in ('403', 'Forbidden', 'HTTP Error 400',
-                                                     'Please sign in', 'Sign in', 'Bad Request'))
+                is_auth = any(x in err_s for x in ('403', 'Forbidden', 'sign in', 'Sign in',
+                                                     'Please sign'))
                 if is_auth:
-                    logger.warning('Auth error — clearing stale token and retrying OAuth2')
-                    _clear_stale_oauth2_token()   # only clear on confirmed auth failure
+                    logger.warning('Auth error — retrying with web_creator client')
                     if self.progress_callback:
                         self.progress_callback({'status': 'started',
-                                                'message': 'OAuth2 ile tekrar deneniyor…'})
+                                                'message': 'Alternatif client ile deneniyor…'})
                     opts.pop('cookiesfrombrowser', None)
                     opts.pop('cookiefile', None)
-                    opts.pop('extractor_args', None)
-                    opts['username'] = 'oauth2'
-                    opts['password'] = ''
+                    opts['extractor_args'] = {'youtube': {'player_client': ['web_creator', 'tv_embedded']}}
                     title = _run_download(opts)
                 else:
                     raise
@@ -564,19 +561,16 @@ class DownloadManager:
                 title = _run_audio(opts)
             except Exception as first_err:
                 err_s = str(first_err)
-                is_auth = any(x in err_s for x in ('403', 'Forbidden', 'HTTP Error 400',
-                                                     'Please sign in', 'Sign in', 'Bad Request'))
+                is_auth = any(x in err_s for x in ('403', 'Forbidden', 'sign in', 'Sign in',
+                                                     'Please sign'))
                 if is_auth:
-                    logger.warning('Auth error — clearing stale token and retrying OAuth2')
-                    _clear_stale_oauth2_token()
+                    logger.warning('Auth error — retrying with web_creator client')
                     if self.progress_callback:
                         self.progress_callback({'status': 'started',
-                                                'message': 'OAuth2 ile tekrar deneniyor…'})
+                                                'message': 'Alternatif client ile deneniyor…'})
                     opts.pop('cookiesfrombrowser', None)
                     opts.pop('cookiefile', None)
-                    opts.pop('extractor_args', None)
-                    opts['username'] = 'oauth2'
-                    opts['password'] = ''
+                    opts['extractor_args'] = {'youtube': {'player_client': ['web_creator', 'tv_embedded']}}
                     title = _run_audio(opts)
                 else:
                     raise
