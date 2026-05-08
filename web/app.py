@@ -13,6 +13,7 @@ from pathlib import Path
 from functools import wraps
 from datetime import datetime
 
+import tempfile
 import requests as req_lib
 from flask import Flask, render_template, request, jsonify, send_file, session
 from flask_socketio import SocketIO
@@ -114,6 +115,68 @@ class HistoryDB:
 history_db = HistoryDB(HISTORY_DB_PATH)
 
 
+# ── Auto cookie extraction ─────────────────────────────────────────────────────
+
+_SESSION_COOKIES_PATH: str = ''
+
+
+def _rookiepy_export() -> str:
+    """Export YouTube cookies via rookiepy (handles Chrome 127+ ABE). Returns path or ''."""
+    try:
+        import rookiepy
+    except ImportError:
+        return ''
+    for browser_name in ('chrome', 'edge', 'opera', 'firefox'):
+        try:
+            fn = getattr(rookiepy, browser_name, None)
+            if fn is None:
+                continue
+            cookies = fn(domains=['.youtube.com'])
+            if not cookies:
+                continue
+            tmp = tempfile.NamedTemporaryFile(
+                suffix='_yt_cookies.txt', delete=False, mode='w', dir=str(WEB_DIR)
+            )
+            tmp.write('# Netscape HTTP Cookie File\n')
+            for c in cookies:
+                domain = c.get('domain', '.youtube.com')
+                if not domain.startswith('.'):
+                    domain = '.' + domain
+                expires = int(c.get('expirationDate') or c.get('expires') or c.get('expiry') or 0)
+                tmp.write(
+                    f"{domain}\tTRUE\t{c.get('path','/')}\t"
+                    f"{'TRUE' if c.get('secure') else 'FALSE'}\t{expires}\t"
+                    f"{c['name']}\t{c['value']}\n"
+                )
+            tmp.close()
+            if Path(tmp.name).stat().st_size > 200:
+                log.info(f'Auto-extracted {browser_name} cookies')
+                return tmp.name
+            Path(tmp.name).unlink(missing_ok=True)
+        except Exception as e:
+            log.debug(f'rookiepy {browser_name}: {e}')
+    return ''
+
+
+def _apply_auth(opts: dict) -> None:
+    """Add YouTube auth to yt-dlp opts automatically."""
+    global _SESSION_COOKIES_PATH
+    cookies_file = WEB_DIR / 'cookies.txt'
+    if cookies_file.exists() and cookies_file.stat().st_size > 100:
+        opts['cookiefile'] = str(cookies_file)
+        return
+    if _SESSION_COOKIES_PATH and Path(_SESSION_COOKIES_PATH).exists():
+        opts['cookiefile'] = _SESSION_COOKIES_PATH
+        return
+    path = _rookiepy_export()
+    if path:
+        _SESSION_COOKIES_PATH = path
+        opts['cookiefile'] = path
+        return
+    opts.setdefault('extractor_args', {})
+    opts['extractor_args']['youtube'] = {'player_client': ['web_creator', 'tv_embedded']}
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def detect_platform(url: str) -> str:
@@ -199,6 +262,7 @@ def _worker(job_id: str, url: str, fmt: str, is_audio: bool, sid: str,
         'socket_timeout':    30,
         'retries':           3,
     }
+    _apply_auth(opts)
 
     if is_audio:
         opts['postprocessors'] = [{
@@ -237,16 +301,33 @@ def _worker(job_id: str, url: str, fmt: str, is_audio: bool, sid: str,
                 'already_have_subtitle': False,
             })
 
+    def _run_dl(dl_opts):
+        with yt_dlp.YoutubeDL(dl_opts) as ydl:
+            ydl.download([url])
+            try:
+                meta = ydl.extract_info(url, download=False)
+                return (meta or {}).get('title', 'Unknown')
+            except Exception:
+                return 'Unknown'
+
     title = 'Unknown'
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info  = ydl.download([url])
-            # Try to extract title via a second info call
-            try:
-                meta  = ydl.extract_info(url, download=False)
-                title = (meta or {}).get('title', 'Unknown')
-            except Exception:
-                pass
+        try:
+            title = _run_dl(opts)
+        except Exception as first_err:
+            err_s = str(first_err)
+            if any(x in err_s for x in ('403', 'Forbidden', 'HTTP Error', 'Sign in', 'bot')):
+                log.warning(f'403/bot — retrying with web_creator client')
+                socketio.emit('progress', {
+                    'job_id': job_id, 'percent': 1, 'pct_str': '1%',
+                    'speed': '—', 'eta': 'Retrying…', 'done': '—', 'total': '—',
+                }, room=sid)
+                opts.pop('cookiesfrombrowser', None)
+                opts.pop('cookiefile', None)
+                opts['extractor_args'] = {'youtube': {'player_client': ['web_creator', 'tv_embedded']}}
+                title = _run_dl(opts)
+            else:
+                raise
 
         candidates = [
             f for f in DOWNLOADS_DIR.iterdir()

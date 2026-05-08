@@ -49,26 +49,101 @@ else:
     logger.warning('Node.js not found — YouTube may have limited formats')
 
 
+# ── Auto cookie extraction ─────────────────────────────────────────────────────
+
+_SESSION_COOKIES_PATH: str = ''   # cached for the process lifetime
+
+
+def _rookiepy_export() -> str:
+    """
+    Export YouTube cookies from Chrome/Edge/Opera to a Netscape temp file.
+    rookiepy handles Chrome 127+ App-Bound Encryption without DPAPI issues.
+    Returns temp file path on success, '' on failure.
+    """
+    try:
+        import rookiepy
+    except ImportError:
+        return ''
+
+    import tempfile
+    for browser_name in ('chrome', 'edge', 'opera', 'firefox'):
+        try:
+            fn = getattr(rookiepy, browser_name, None)
+            if fn is None:
+                continue
+            cookies = fn(domains=['.youtube.com'])
+            if not cookies:
+                continue
+
+            tmp = tempfile.NamedTemporaryFile(
+                suffix='_yt_cookies.txt', delete=False, mode='w',
+                dir=str(Path(__file__).parent),
+            )
+            tmp.write('# Netscape HTTP Cookie File\n')
+            for c in cookies:
+                domain = c.get('domain', '.youtube.com')
+                if not domain.startswith('.'):
+                    domain = '.' + domain
+                expires = int(
+                    c.get('expirationDate') or c.get('expires') or c.get('expiry') or 0
+                )
+                tmp.write(
+                    f"{domain}\tTRUE\t"
+                    f"{c.get('path', '/')}\t"
+                    f"{'TRUE' if c.get('secure') else 'FALSE'}\t"
+                    f"{expires}\t"
+                    f"{c['name']}\t{c['value']}\n"
+                )
+            tmp.close()
+
+            if Path(tmp.name).stat().st_size > 200:
+                logger.info(f'Auto-extracted {browser_name} cookies ({Path(tmp.name).stat().st_size} bytes)')
+                return tmp.name
+            Path(tmp.name).unlink(missing_ok=True)
+
+        except Exception as e:
+            logger.debug(f'rookiepy {browser_name}: {e}')
+
+    return ''
+
+
 def _add_browser_cookies(opts: dict) -> None:
-    """Add Chrome cookies (most common browser, user has it open)."""
-    chrome_paths = [
-        r'C:\Program Files\Google\Chrome\Application\chrome.exe',
-        r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
-        os.path.expanduser(r'~\AppData\Local\Google\Chrome\Application\chrome.exe'),
-    ]
-    if any(os.path.exists(p) for p in chrome_paths):
-        opts['cookiesfrombrowser'] = ('chrome',)
-        logger.info('Using Chrome cookies')
+    """
+    Automatically configure YouTube authentication — no manual steps needed.
+
+    Priority:
+      1. cookies.txt  (if user manually placed it next to the script)
+      2. rookiepy     (auto-extracts Chrome/Edge/Opera, handles Chrome 127+ ABE)
+      3. web_creator / tv_embedded player clients (no cookies or PO tokens needed)
+    """
+    global _SESSION_COOKIES_PATH
+
+    # 1. Manually-placed cookies.txt
+    cookies_file = Path(__file__).parent / 'cookies.txt'
+    if cookies_file.exists() and cookies_file.stat().st_size > 100:
+        opts['cookiefile'] = str(cookies_file)
+        logger.info('Auth: cookies.txt')
         return
-    opera_paths = [
-        os.path.expanduser(r'~\AppData\Local\Programs\Opera\opera.exe'),
-        os.path.expanduser(r'~\AppData\Local\Programs\Opera GX\opera.exe'),
-    ]
-    if any(os.path.exists(p) for p in opera_paths):
-        opts['cookiesfrombrowser'] = ('opera',)
-        logger.info('Using Opera cookies')
+
+    # 2. Cached auto-cookies from this session
+    if _SESSION_COOKIES_PATH and Path(_SESSION_COOKIES_PATH).exists():
+        opts['cookiefile'] = _SESSION_COOKIES_PATH
         return
-    logger.warning('No supported browser found for cookies')
+
+    # 3. rookiepy auto-extract (handles Chrome 127+ App-Bound Encryption)
+    path = _rookiepy_export()
+    if path:
+        _SESSION_COOKIES_PATH = path
+        opts['cookiefile'] = path
+        logger.info('Auth: auto-extracted browser cookies')
+        return
+
+    # 4. No cookies available — use clients that bypass PO token / SABR
+    opts.setdefault('extractor_args', {})
+    opts['extractor_args']['youtube'] = {
+        'player_client': ['web_creator', 'tv_embedded'],
+    }
+    logger.info('Auth: web_creator client (no cookies or PO tokens needed)')
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -317,9 +392,26 @@ class DownloadManager:
             if self.progress_callback:
                 self.progress_callback({'status': 'started', 'message': f'Downloading {quality}…'})
 
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info  = ydl.extract_info(url, download=True)
-                title = (info or {}).get('title', 'Unknown')
+            def _run_download(dl_opts):
+                with yt_dlp.YoutubeDL(dl_opts) as ydl:
+                    i = ydl.extract_info(url, download=True)
+                    return (i or {}).get('title', 'Unknown')
+
+            try:
+                title = _run_download(opts)
+            except Exception as first_err:
+                err_s = str(first_err)
+                if any(x in err_s for x in ('403', 'Forbidden', 'HTTP Error', 'Sign in', 'bot')):
+                    logger.warning(f'403/bot error — retrying with web_creator client')
+                    if self.progress_callback:
+                        self.progress_callback({'status': 'started',
+                                                'message': 'Retrying with alternative client…'})
+                    opts.pop('cookiesfrombrowser', None)
+                    opts.pop('cookiefile', None)
+                    opts['extractor_args'] = {'youtube': {'player_client': ['web_creator', 'tv_embedded']}}
+                    title = _run_download(opts)
+                else:
+                    raise
 
             candidates = sorted(
                 [f for f in DOWNLOADS_DIR.iterdir()
@@ -380,9 +472,26 @@ class DownloadManager:
             if self.progress_callback:
                 self.progress_callback({'status': 'started', 'message': f'Extracting MP3 {quality_kbps}kbps…'})
 
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info  = ydl.extract_info(url, download=True)
-                title = (info or {}).get('title', 'Unknown')
+            def _run_audio(dl_opts):
+                with yt_dlp.YoutubeDL(dl_opts) as ydl:
+                    i = ydl.extract_info(url, download=True)
+                    return (i or {}).get('title', 'Unknown')
+
+            try:
+                title = _run_audio(opts)
+            except Exception as first_err:
+                err_s = str(first_err)
+                if any(x in err_s for x in ('403', 'Forbidden', 'HTTP Error', 'Sign in', 'bot')):
+                    logger.warning(f'403/bot error — retrying with web_creator client')
+                    if self.progress_callback:
+                        self.progress_callback({'status': 'started',
+                                                'message': 'Retrying with alternative client…'})
+                    opts.pop('cookiesfrombrowser', None)
+                    opts.pop('cookiefile', None)
+                    opts['extractor_args'] = {'youtube': {'player_client': ['web_creator', 'tv_embedded']}}
+                    title = _run_audio(opts)
+                else:
+                    raise
 
             candidates = sorted(
                 [f for f in MUSIC_DIR.iterdir()
