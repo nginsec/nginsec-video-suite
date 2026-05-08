@@ -156,10 +156,7 @@ class DownloadManager:
 
     def get_video_info(self, url: str) -> Optional[Dict]:
         try:
-            with yt_dlp.YoutubeDL({
-                'quiet': True, 'no_warnings': True,
-                'extractor_args': {'youtube': {'player_client': ['ios', 'web']}},
-            }) as ydl:
+            with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True}) as ydl:
                 info = ydl.extract_info(url, download=False)
             return self._format_video_info(info)
         except Exception as e:
