@@ -216,11 +216,10 @@ def _add_browser_cookies(opts: dict) -> None:
             logger.info(f'Auth: yt-dlp {browser} cookies')
             return
 
-    # 5. OAuth2 device-code flow — last resort; clears stale token first
-    _clear_stale_oauth2_token()
+    # 5. OAuth2 — use cached token silently if available; device-code only first time
     opts['username'] = 'oauth2'
     opts['password'] = ''
-    logger.info('Auth: OAuth2 (one-time Google login required)')
+    logger.info('Auth: OAuth2 (cached token or one-time Google login)')
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -479,11 +478,14 @@ class DownloadManager:
                 title = _run_download(opts)
             except Exception as first_err:
                 err_s = str(first_err)
-                if any(x in err_s for x in ('403', 'Forbidden', 'HTTP Error', 'Please sign in', 'Sign in')):
-                    logger.warning('Auth error — retrying with OAuth2')
+                is_auth = any(x in err_s for x in ('403', 'Forbidden', 'HTTP Error 400',
+                                                     'Please sign in', 'Sign in', 'Bad Request'))
+                if is_auth:
+                    logger.warning('Auth error — clearing stale token and retrying OAuth2')
+                    _clear_stale_oauth2_token()   # only clear on confirmed auth failure
                     if self.progress_callback:
                         self.progress_callback({'status': 'started',
-                                                'message': 'Authenticating via OAuth2…'})
+                                                'message': 'OAuth2 ile tekrar deneniyor…'})
                     opts.pop('cookiesfrombrowser', None)
                     opts.pop('cookiefile', None)
                     opts.pop('extractor_args', None)
@@ -562,11 +564,14 @@ class DownloadManager:
                 title = _run_audio(opts)
             except Exception as first_err:
                 err_s = str(first_err)
-                if any(x in err_s for x in ('403', 'Forbidden', 'HTTP Error', 'Please sign in', 'Sign in')):
-                    logger.warning('Auth error — retrying with OAuth2')
+                is_auth = any(x in err_s for x in ('403', 'Forbidden', 'HTTP Error 400',
+                                                     'Please sign in', 'Sign in', 'Bad Request'))
+                if is_auth:
+                    logger.warning('Auth error — clearing stale token and retrying OAuth2')
+                    _clear_stale_oauth2_token()
                     if self.progress_callback:
                         self.progress_callback({'status': 'started',
-                                                'message': 'Authenticating via OAuth2…'})
+                                                'message': 'OAuth2 ile tekrar deneniyor…'})
                     opts.pop('cookiesfrombrowser', None)
                     opts.pop('cookiefile', None)
                     opts.pop('extractor_args', None)
