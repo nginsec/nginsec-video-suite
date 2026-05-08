@@ -49,6 +49,29 @@ else:
     logger.warning('Node.js not found — YouTube may have limited formats')
 
 
+def _add_browser_cookies(opts: dict) -> None:
+    """Try to add browser cookies — Firefox first (no DPAPI), then Chrome, Edge."""
+    browser_paths = [
+        ('firefox', [
+            r'C:\Program Files\Mozilla Firefox\firefox.exe',
+            r'C:\Program Files (x86)\Mozilla Firefox\firefox.exe',
+        ]),
+        ('chrome', [
+            r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+            r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+        ]),
+        ('edge', [
+            r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
+            r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
+        ]),
+    ]
+    for browser, paths in browser_paths:
+        if any(os.path.exists(p) for p in paths):
+            opts['cookiesfrombrowser'] = (browser,)
+            logger.info(f'Using {browser} cookies')
+            return
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def detect_platform(url: str) -> Tuple[str, str]:
@@ -269,6 +292,7 @@ class DownloadManager:
             opts['http_headers']       = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'}
             if _NODE:
                 opts['js_runtimes'] = {'node': {'path': _NODE}}
+            _add_browser_cookies(opts)
 
             # Clip extraction
             if clip_start or clip_end:
@@ -347,6 +371,7 @@ class DownloadManager:
             opts['http_headers']       = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'}
             if _NODE:
                 opts['js_runtimes'] = {'node': {'path': _NODE}}
+            _add_browser_cookies(opts)
             opts['postprocessors'] = [{
                 'key':              'FFmpegExtractAudio',
                 'preferredcodec':   'mp3',
