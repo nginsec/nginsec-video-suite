@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>nginsec · Secure Video Retrieval System</title>
+
+  <!-- Bootstrap 5 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+
+  <style>
+    /* ─── Design tokens ──────────────────────────────────────────────────────── */
+    :root {
+      --bg:           #070b14;
+      --surface:      #0f1623;
+      --card:         #141c2c;
+      --card-hover:   #19243a;
+      --border:       rgba(255, 255, 255, 0.07);
+      --border-lit:   rgba(255, 255, 255, 0.13);
+      --cyan:         #06b6d4;
+      --indigo:       #818cf8;
+      --grad:         linear-gradient(135deg, #06b6d4 0%, #818cf8 100%);
+      --success:      #10b981;
+      --danger:       #ef4444;
+      --text:         #e2e8f0;
+      --muted:        #64748b;
+      --muted-light:  #94a3b8;
+    }
+
+    /* ─── Reset / base ───────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Ambient radial glow behind everything */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      background:
+        radial-gradient(ellipse 60% 50% at 15% 60%, rgba(6,182,212,.07) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 40% at 85% 25%, rgba(129,140,248,.06) 0%, transparent 70%);
+      animation: ambientPulse 10s ease-in-out infinite alternate;
+    }
+    @keyframes ambientPulse {
+      from { opacity: .7; }
+      to   { opacity: 1; }
+    }
+
+    /* ─── Auth overlay ───────────────────────────────────────────────────────── */
+    #auth-screen {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9000;
+      background: var(--bg);
+    }
+
+    .auth-card {
+      position: relative;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 48px 44px;
+      width: 100%;
+      max-width: 430px;
+      box-shadow: 0 32px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04);
+      overflow: hidden;
+    }
+    /* Gradient top accent line */
+    .auth-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: var(--grad);
+    }
+
+    /* ─── Logo / branding ────────────────────────────────────────────────────── */
+    .brand-logo-text {
+      font-size: 34px;
+      font-weight: 800;
+      letter-spacing: -1px;
+      background: var(--grad);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .brand-sub {
+      font-size: 10px;
+      letter-spacing: 3.5px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* ─── Inputs ─────────────────────────────────────────────────────────────── */
+    .ng-input {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      padding: 13px 16px;
+      font-size: 14px;
+      transition: border-color .18s, box-shadow .18s;
+      outline: none;
+    }
+    .ng-input:focus {
+      border-color: var(--cyan);
+      box-shadow: 0 0 0 3px rgba(6,182,212,.12);
+    }
+    .ng-input::placeholder { color: var(--muted); }
+
+    /* ─── Buttons ────────────────────────────────────────────────────────────── */
+    .btn-grad {
+      background: var(--grad);
+      border: none;
+      color: #fff;
+      font-weight: 600;
+      font-size: 14px;
+      padding: 12px 24px;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: opacity .15s, transform .15s, box-shadow .15s;
+      white-space: nowrap;
+    }
+    .btn-grad:hover:not(:disabled) {
+      opacity: .9;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(129,140,248,.35);
+    }
+    .btn-grad:active:not(:disabled) { transform: none; }
+    .btn-grad:disabled { opacity: .45; cursor: not-allowed; transform: none !important; }
+
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border-lit);
+      color: var(--muted-light);
+      font-size: 13px;
+      padding: 8px 18px;
+      border-radius: 9px;
+      cursor: pointer;
+      transition: background .15s, border-color .15s, color .15s;
+    }
+    .btn-ghost:hover { background: rgba(255,255,255,.05); color: var(--text); }
+
+    .btn-success-dl {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: linear-gradient(135deg, #10b981, #059669);
+      border: none;
+      color: #fff;
+      font-weight: 700;
+      font-size: 15px;
+      padding: 15px 36px;
+      border-radius: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: opacity .15s, transform .15s, box-shadow .15s;
+    }
+    .btn-success-dl:hover {
+      opacity: .92;
+      transform: translateY(-2px);
+      box-shadow: 0 10px 28px rgba(16,185,129,.4);
+      color: #fff;
+    }
+
+    /* ─── Navbar ─────────────────────────────────────────────────────────────── */
+    .app-nav {
+      position: sticky;
+      top: 0;
+      z-index: 500;
+      background: rgba(15, 22, 35, 0.85);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 0;
+    }
+    .nav-brand { font-size: 19px; font-weight: 800; letter-spacing: -.5px; }
+    .badge-pill {
+      font-size: 10px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 20px;
+      background: rgba(255,255,255,.05);
+      border: 1px solid var(--border-lit);
+      color: var(--muted-light);
+    }
+    .badge-secure {
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      background: rgba(16,185,129,.1);
+      border: 1px solid rgba(16,185,129,.25);
+      color: var(--success);
+    }
+
+    /* ─── Glass cards ────────────────────────────────────────────────────────── */
+    .g-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .g-card-header {
+      background: rgba(255,255,255,.025);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .g-card-header .section-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--muted-light);
+    }
+    .g-card-icon {
+      color: var(--cyan);
+      font-size: 17px;
+      line-height: 1;
+    }
+
+    /* ─── Format select ──────────────────────────────────────────────────────── */
+    .ng-select {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      padding: 12px 36px 12px 14px;
+      font-size: 14px;
+      cursor: pointer;
+      outline: none;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='%2364748b' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: calc(100% - 13px) center;
+      transition: border-color .18s;
+    }
+    .ng-select:focus { border-color: var(--cyan); }
+    .ng-select option { background: #1a2035; }
+
+    /* ─── Video thumbnail ────────────────────────────────────────────────────── */
+    .thumb-wrap {
+      position: relative;
+      border-radius: 10px;
+      overflow: hidden;
+      background: #0a0e1a;
+    }
+    .thumb-wrap img {
+      width: 100%;
+      aspect-ratio: 16/9;
+      object-fit: cover;
+      display: block;
+    }
+    .thumb-wrap::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(to top, rgba(7,11,20,.75) 0%, transparent 55%);
+    }
+
+    /* ─── Meta badges ────────────────────────────────────────────────────────── */
+    .meta-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(255,255,255,.05);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: var(--muted-light);
+    }
+
+    /* ─── Progress bar ───────────────────────────────────────────────────────── */
+    .prog-track {
+      background: rgba(255,255,255,.05);
+      border-radius: 100px;
+      height: 9px;
+      overflow: hidden;
+    }
+    .prog-fill {
+      height: 100%;
+      border-radius: 100px;
+      background: var(--grad);
+      transition: width .35s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .prog-fill::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.28) 50%, transparent 100%);
+      animation: shimmer 1.6s infinite linear;
+    }
+    @keyframes shimmer {
+      from { transform: translateX(-100%); }
+      to   { transform: translateX(100%);  }
+    }
+
+    /* ─── Stat pills ─────────────────────────────────────────────────────────── */
+    .stat-pill {
+      background: rgba(255,255,255,.04);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 14px;
+      min-width: 0;
+    }
+    .stat-val  { font-size: 14px; font-weight: 700; color: var(--cyan); }
+    .stat-lbl  { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    /* ─── Status dot ─────────────────────────────────────────────────────────── */
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      background: var(--muted);
+    }
+    .dot.active {
+      background: var(--cyan);
+      animation: dotPulse 1s ease-in-out infinite;
+    }
+    .dot.done { background: var(--success); animation: none; }
+    @keyframes dotPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: .4; transform: scale(.75); }
+    }
+
+    /* ─── Error card ─────────────────────────────────────────────────────────── */
+    .err-card {
+      background: rgba(239,68,68,.08);
+      border: 1px solid rgba(239,68,68,.28);
+      border-radius: 10px;
+      padding: 12px 16px;
+      color: #fca5a5;
+      font-size: 14px;
+    }
+
+    /* ─── Success card ───────────────────────────────────────────────────────── */
+    .success-card {
+      border-color: rgba(16,185,129,.28) !important;
+      box-shadow: 0 0 28px rgba(16,185,129,.08);
+    }
+
+    /* ─── Spinner ────────────────────────────────────────────────────────────── */
+    .spin {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,.2);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: rotate .7s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    @keyframes rotate { to { transform: rotate(360deg); } }
+
+    /* ─── Fade-in animation ──────────────────────────────────────────────────── */
+    .fade-in {
+      animation: fadeUp .35s ease both;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ─── Auth fade-out ──────────────────────────────────────────────────────── */
+    @keyframes fadeOut {
+      to { opacity: 0; transform: scale(.97); }
+    }
+
+    /* ─── Footer ─────────────────────────────────────────────────────────────── */
+    .app-footer {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+      padding: 32px 0 24px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     AUTH SCREEN
+════════════════════════════════════════════════════════════════════════════ -->
+<div id="auth-screen">
+  <div class="auth-card fade-in">
+
+    <!-- Logo -->
+    <div class="text-center mb-4">
+      <svg width="52" height="52" viewBox="0 0 52 52" fill="none" style="margin-bottom:12px">
+        <rect width="52" height="52" rx="14" fill="url(#aLogo)"/>
+        <path d="M15 26L24 17L33 26L24 35L15 26Z" fill="white" opacity=".92"/>
+        <path d="M24 26L33 17L42 26L33 35L24 26Z" fill="white" opacity=".45"/>
+        <defs>
+          <linearGradient id="aLogo" x1="0" y1="0" x2="52" y2="52">
+            <stop offset="0%"   stop-color="#06b6d4"/>
+            <stop offset="100%" stop-color="#818cf8"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <div class="brand-logo-text">nginsec</div>
+      <div class="brand-sub">Secure Video Retrieval System</div>
+    </div>
+
+    <!-- Key input -->
+    <label style="font-size:12px; color:var(--muted); letter-spacing:.5px; display:block; margin-bottom:8px;">
+      SYSTEM ACCESS KEY
+    </label>
+    <input id="auth-input" type="password" class="ng-input"
+           placeholder="Enter your access key" autocomplete="off"
+           onkeydown="if(event.key==='Enter') doAuth()" />
+
+    <div id="auth-err" class="err-card mt-3" style="display:none;">
+      <i class="bi bi-shield-x me-2"></i>Invalid access key. Please try again.
+    </div>
+
+    <button id="auth-btn" class="btn-grad mt-4" style="width:100%;" onclick="doAuth()">
+      <i class="bi bi-shield-lock-fill me-2"></i>Authenticate
+    </button>
+
+    <p class="text-center mt-4 mb-0" style="font-size:11px; color:var(--muted);">
+      <i class="bi bi-lock-fill" style="color:var(--success);"></i>
+      &nbsp;Protected access · nginsec Video Cloud Suite
+    </p>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     MAIN APP  (hidden until authenticated)
+════════════════════════════════════════════════════════════════════════════ -->
+<div id="main-app" style="display:none; position:relative; z-index:1;">
+
+  <!-- Navbar -->
+  <nav class="app-nav">
+    <div class="container" style="max-width:780px;">
+      <div class="d-flex align-items-center justify-content-between">
+
+        <div class="d-flex align-items-center gap-3">
+          <svg width="34" height="34" viewBox="0 0 52 52" fill="none">
+            <rect width="52" height="52" rx="14" fill="url(#nLogo)"/>
+            <path d="M15 26L24 17L33 26L24 35L15 26Z" fill="white" opacity=".92"/>
+            <path d="M24 26L33 17L42 26L33 35L24 26Z" fill="white" opacity=".45"/>
+            <defs>
+              <linearGradient id="nLogo" x1="0" y1="0" x2="52" y2="52">
+                <stop offset="0%"   stop-color="#06b6d4"/>
+                <stop offset="100%" stop-color="#818cf8"/>
+              </linearGradient>
+            </defs>
+          </svg>
+          <div>
+            <div class="nav-brand" style="background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">nginsec</div>
+          </div>
+        </div>
+
+        <div class="d-flex align-items-center gap-2">
+          <span class="badge-pill d-none d-sm-inline">Video Cloud Suite</span>
+          <span class="badge-secure">
+            <i class="bi bi-shield-check-fill me-1"></i>Secure Session
+          </span>
+        </div>
+
+      </div>
+    </div>
+  </nav>
+
+  <!-- Content -->
+  <div class="container py-4" style="max-width:780px;">
+
+    <!-- ── URL Input Card ──────────────────────────────────────────────────── -->
+    <div class="g-card mb-4">
+      <div class="g-card-header">
+        <i class="bi bi-link-45deg g-card-icon"></i>
+        <span class="section-label">Video URL</span>
+      </div>
+      <div class="p-4">
+        <div class="d-flex gap-2">
+          <input id="url-input" type="url" class="ng-input"
+                 placeholder="Paste a YouTube URL — e.g. https://youtube.com/watch?v=…"
+                 onkeydown="if(event.key==='Enter') doFetch()" />
+          <button id="fetch-btn" class="btn-grad" style="min-width:120px;" onclick="doFetch()">
+            <i class="bi bi-search me-1"></i> Analyze
+          </button>
+        </div>
+        <div id="url-err" class="err-card mt-3" style="display:none;"></div>
+      </div>
+    </div>
+
+    <!-- ── Video Info Card (hidden initially) ─────────────────────────────── -->
+    <div id="info-card" class="g-card mb-4 fade-in" style="display:none;">
+      <div class="g-card-header">
+        <i class="bi bi-play-circle-fill g-card-icon"></i>
+        <span class="section-label">Video Information</span>
+      </div>
+      <div class="p-4">
+        <div class="row g-3">
+
+          <!-- Thumbnail -->
+          <div class="col-md-5">
+            <div class="thumb-wrap">
+              <img id="vid-thumb" src="" alt="thumbnail" loading="lazy" />
+            </div>
+          </div>
+
+          <!-- Metadata + controls -->
+          <div class="col-md-7 d-flex flex-column justify-content-between">
+
+            <div>
+              <h6 id="vid-title" class="fw-bold mb-3" style="font-size:15px; line-height:1.45;"></h6>
+
+              <div class="d-flex flex-wrap gap-2 mb-4">
+                <span class="meta-badge"><i class="bi bi-person-fill"></i><span id="vid-uploader"></span></span>
+                <span class="meta-badge"><i class="bi bi-clock-fill"></i><span id="vid-duration"></span></span>
+                <span class="meta-badge"><i class="bi bi-eye-fill"></i><span id="vid-views"></span></span>
+              </div>
+
+              <!-- Format selector -->
+              <div class="mb-3">
+                <div class="section-label mb-2" style="font-size:10px;">
+                  <i class="bi bi-collection-fill me-1"></i> SELECT FORMAT
+                </div>
+                <select id="fmt-select" class="ng-select"></select>
+              </div>
+            </div>
+
+            <!-- Download button -->
+            <button id="dl-btn" class="btn-grad" style="width:100%; padding:13px;" onclick="doDownload()">
+              <i class="bi bi-download me-2"></i>Download
+            </button>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Progress Card (hidden initially) ───────────────────────────────── -->
+    <div id="prog-card" class="g-card mb-4 fade-in" style="display:none;">
+      <div class="g-card-header">
+        <span class="dot active" id="prog-dot"></span>
+        <span class="section-label" id="prog-header">Downloading…</span>
+      </div>
+      <div class="p-4">
+
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span id="prog-status" style="font-size:13px; color:var(--muted-light);">Initializing…</span>
+          <span id="prog-pct" style="font-size:22px; font-weight:800; font-variant-numeric:tabular-nums;">0%</span>
+        </div>
+
+        <div class="prog-track mb-4">
+          <div class="prog-fill" id="prog-bar" style="width:0%;"></div>
+        </div>
+
+        <!-- Stats row -->
+        <div class="row g-2">
+          <div class="col-4">
+            <div class="stat-pill">
+              <div class="stat-val" id="s-speed">—</div>
+              <div class="stat-lbl">Speed</div>
+            </div>
+          </div>
+          <div class="col-4">
+            <div class="stat-pill">
+              <div class="stat-val" id="s-eta">—</div>
+              <div class="stat-lbl">ETA</div>
+            </div>
+          </div>
+          <div class="col-4">
+            <div class="stat-pill">
+              <div class="stat-val" id="s-done">—</div>
+              <div class="stat-lbl">Downloaded</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── Complete Card (hidden initially) ───────────────────────────────── -->
+    <div id="ok-card" class="g-card success-card mb-4 fade-in" style="display:none;">
+      <div class="p-5 text-center">
+        <div style="width:68px;height:68px;border-radius:50%;background:rgba(16,185,129,.14);
+                    display:flex;align-items:center;justify-content:center;margin:0 auto 18px;">
+          <i class="bi bi-check-circle-fill" style="font-size:34px;color:var(--success);"></i>
+        </div>
+        <h5 class="fw-bold mb-2">Download Ready</h5>
+        <p id="ok-filename" style="font-size:13px;color:var(--muted);margin-bottom:24px;word-break:break-all;"></p>
+        <a id="ok-link" href="#" class="btn-success-dl" target="_blank">
+          <i class="bi bi-cloud-download-fill"></i> Save File to Computer
+        </a>
+        <div class="mt-4">
+          <button class="btn-ghost" onclick="doReset()">
+            <i class="bi bi-arrow-counterclockwise me-1"></i>Download Another
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Download Error ──────────────────────────────────────────────────── -->
+    <div id="dl-err" style="display:none;" class="mb-4">
+      <div class="err-card d-flex align-items-start gap-3">
+        <i class="bi bi-exclamation-triangle-fill mt-1" style="flex-shrink:0;font-size:16px;"></i>
+        <div style="flex:1;">
+          <strong style="display:block;margin-bottom:4px;">Download Failed</strong>
+          <span id="dl-err-msg" style="font-size:13px;"></span>
+        </div>
+        <button class="btn-ghost" onclick="doReset()" style="flex-shrink:0;">Retry</button>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="app-footer">
+      <span class="badge-secure">
+        <i class="bi bi-shield-lock-fill me-1"></i>
+        nginsec Video Cloud Suite · Secure Video Retrieval System
+      </span>
+    </div>
+
+  </div><!-- /container -->
+</div><!-- /main-app -->
+
+
+<!-- ─── Dependencies ──────────────────────────────────────────────────────────── -->
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- ─── Application JS ───────────────────────────────────────────────────────── -->
+<script>
+  'use strict';
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  let sid       = null;   // Socket.io session ID
+  let jobId     = null;   // Active download job ID
+
+  // ── Socket.io ──────────────────────────────────────────────────────────────
+  const socket = io({ transports: ['websocket', 'polling'] });
+
+  socket.on('connect', () => {
+    sid = socket.id;
+  });
+
+  socket.on('progress', d => {
+    if (d.job_id !== jobId) return;
+    el('prog-card').style.display = 'block';
+    el('prog-bar').style.width    = d.percent + '%';
+    el('prog-pct').textContent    = d.pct_str  || d.percent + '%';
+    el('prog-status').textContent = 'Downloading…';
+    el('s-speed').textContent     = d.speed || '—';
+    el('s-eta').textContent       = d.eta   || '—';
+    el('s-done').textContent      = d.done  || '—';
+  });
+
+  socket.on('complete', d => {
+    if (d.job_id !== jobId) return;
+
+    // Fill progress to 100 %
+    el('prog-bar').style.width    = '100%';
+    el('prog-pct').textContent    = '100%';
+    el('prog-status').textContent = 'Complete!';
+    el('prog-dot').className      = 'dot done';
+    el('prog-header').textContent = 'Download Complete';
+
+    setTimeout(() => {
+      el('prog-card').style.display = 'none';
+      el('ok-card').style.display   = 'block';
+      el('ok-filename').textContent = d.filename;
+      el('ok-link').href            = '/file/' + d.job_id;
+    }, 600);
+
+    resetDlBtn();
+  });
+
+  socket.on('dl_error', d => {
+    if (d.job_id !== jobId) return;
+    el('prog-card').style.display  = 'none';
+    el('dl-err').style.display     = 'block';
+    el('dl-err-msg').textContent   = d.error || 'An error occurred.';
+    resetDlBtn();
+  });
+
+  // ── Auth ───────────────────────────────────────────────────────────────────
+  async function doAuth() {
+    const key = el('auth-input').value;
+    const btn = el('auth-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spin"></span>';
+    el('auth-err').style.display = 'none';
+
+    try {
+      const res  = await post('/auth', { key });
+      const data = await res.json();
+      if (data.ok) {
+        el('auth-screen').style.animation = 'fadeOut .35s ease forwards';
+        setTimeout(() => {
+          el('auth-screen').style.display = 'none';
+          el('main-app').style.display    = 'block';
+        }, 340);
+      } else {
+        el('auth-err').style.display = 'block';
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-shield-lock-fill me-2"></i>Authenticate';
+      }
+    } catch {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-shield-lock-fill me-2"></i>Authenticate';
+    }
+  }
+
+  // ── Fetch video info ───────────────────────────────────────────────────────
+  async function doFetch() {
+    const url = el('url-input').value.trim();
+    if (!url) return;
+
+    const btn = el('fetch-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spin"></span>';
+    hide('url-err', 'info-card', 'prog-card', 'ok-card', 'dl-err');
+
+    try {
+      const res  = await post('/info', { url });
+      const data = await res.json();
+
+      if (!res.ok) {
+        showErr('url-err', data.error || 'Failed to fetch video info.');
+        return;
+      }
+
+      // Populate UI
+      el('vid-thumb').src              = data.thumbnail || '';
+      el('vid-title').textContent      = data.title;
+      el('vid-uploader').textContent   = data.uploader  || 'Unknown';
+      el('vid-duration').textContent   = data.duration  || '—';
+      el('vid-views').textContent      = fmtViews(data.view_count);
+
+      const sel = el('fmt-select');
+      sel.innerHTML = '';
+      (data.formats || []).forEach(f => {
+        const o = document.createElement('option');
+        o.value = JSON.stringify({ v: f.value, audio: f.type === 'audio' });
+        o.textContent = f.label;
+        sel.appendChild(o);
+      });
+
+      el('info-card').style.display = 'block';
+
+    } catch (e) {
+      showErr('url-err', 'Network error — please try again.');
+    } finally {
+      btn.disabled  = false;
+      btn.innerHTML = '<i class="bi bi-search me-1"></i> Analyze';
+    }
+  }
+
+  // ── Start download ─────────────────────────────────────────────────────────
+  async function doDownload() {
+    if (!sid) { alert('Not connected to server. Please refresh.'); return; }
+
+    const url  = el('url-input').value.trim();
+    const fmt  = JSON.parse(el('fmt-select').value || '{}');
+    const btn  = el('dl-btn');
+
+    btn.disabled  = true;
+    btn.innerHTML = '<span class="spin"></span> Starting…';
+    hide('prog-card', 'ok-card', 'dl-err');
+
+    // Reset progress UI
+    el('prog-bar').style.width    = '0%';
+    el('prog-pct').textContent    = '0%';
+    el('prog-status').textContent = 'Initializing…';
+    el('prog-dot').className      = 'dot active';
+    el('prog-header').textContent = 'Downloading…';
+    el('s-speed').textContent = el('s-eta').textContent = el('s-done').textContent = '—';
+
+    try {
+      const res  = await post('/download', {
+        url,
+        format:    fmt.v    || 'bestvideo+bestaudio/best',
+        is_audio:  fmt.audio || false,
+        socket_id: sid,
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        el('dl-err').style.display   = 'block';
+        el('dl-err-msg').textContent = data.error || 'Failed to start download.';
+        resetDlBtn();
+        return;
+      }
+
+      jobId = data.job_id;
+      el('prog-card').style.display = 'block';
+      el('prog-status').textContent = 'Starting download…';
+
+    } catch {
+      el('dl-err').style.display   = 'block';
+      el('dl-err-msg').textContent = 'Network error — please try again.';
+      resetDlBtn();
+    }
+  }
+
+  // ── Reset ──────────────────────────────────────────────────────────────────
+  function doReset() {
+    el('url-input').value = '';
+    hide('info-card', 'prog-card', 'ok-card', 'dl-err', 'url-err');
+    resetDlBtn();
+    jobId = null;
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  const el  = id => document.getElementById(id);
+  const hide = (...ids) => ids.forEach(id => el(id) && (el(id).style.display = 'none'));
+  const post = (path, body) => fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  function showErr(id, msg) {
+    const d = el(id);
+    if (d) { d.textContent = msg; d.style.display = 'block'; }
+  }
+
+  function resetDlBtn() {
+    const b = el('dl-btn');
+    b.disabled  = false;
+    b.innerHTML = '<i class="bi bi-download me-2"></i>Download';
+  }
+
+  function fmtViews(n) {
+    if (!n) return 'N/A';
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B views';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M views';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K views';
+    return n + ' views';
+  }
+</script>
+
+</body>
+</html>

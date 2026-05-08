@@ -1,0 +1,56 @@
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Secrets & environment ─────────────────────────────────────────────────────
+.env
+.env.local
+.env.production
+*.secret
+
+# ── Downloaded files ──────────────────────────────────────────────────────────
+downloads/
+nginsec_downloads/
+web/downloads/
+web/nginsec_downloads/
+*.mp4
+*.mp3
+*.webm
+*.mkv
+*.m4a
+*.part
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Claude Code internal ──────────────────────────────────────────────────────
+.claude/
+tmpclaude-*/
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+*.zip
+*.tmp
