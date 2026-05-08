@@ -24,6 +24,31 @@ logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, datefmt=LOG_DATE_FORM
 logger = logging.getLogger(__name__)
 
 
+# ── yt-dlp logger (captures OAuth2 device-code prompts) ───────────────────────
+
+_OAUTH2_KEYWORDS = ('google.com/device', 'authorization code', 'Input this',
+                    'Please open', 'Waiting for authorization')
+
+
+class _YtDlpLogger:
+    """Forwards yt-dlp output to our logger; routes OAuth2 prompts to the UI."""
+
+    def __init__(self, cb=None):
+        self._cb = cb
+
+    def debug(self, msg):
+        if msg.startswith('[debug]'):
+            return
+        if self._cb and any(kw.lower() in msg.lower() for kw in _OAUTH2_KEYWORDS):
+            self._cb({'status': 'oauth2_prompt', 'message': msg.strip()})
+
+    def warning(self, msg):
+        logger.warning(msg)
+
+    def error(self, msg):
+        logger.error(msg)
+
+
 # ── Node.js detection ─────────────────────────────────────────────────────────
 
 def _find_node() -> str:
@@ -138,12 +163,12 @@ def _add_browser_cookies(opts: dict) -> None:
         logger.info('Auth: auto-extracted browser cookies')
         return
 
-    # 4. No cookies available — use clients that bypass PO token / SABR
-    opts.setdefault('extractor_args', {})
-    opts['extractor_args']['youtube'] = {
-        'player_client': ['web_creator', 'tv_embedded'],
-    }
-    logger.info('Auth: web_creator client (no cookies or PO tokens needed)')
+    # 4. OAuth2 device-code flow (yt-dlp-youtube-oauth2 plugin)
+    #    First run: shows "open google.com/device, enter XXXX" → user authenticates once.
+    #    All subsequent runs: uses cached token automatically — no interaction needed.
+    opts['username'] = 'oauth2'
+    opts['password'] = ''
+    logger.info('Auth: OAuth2 (one-time setup if not yet authenticated)')
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -361,6 +386,7 @@ class DownloadManager:
             opts['postprocessor_args'] = dict(YT_DLP_OPTS_BASE.get('postprocessor_args', {}))
             opts['outtmpl']            = out_tpl
             opts['progress_hooks']     = [self._progress_hook]
+            opts['logger']             = _YtDlpLogger(cb=self.progress_callback)
             opts['format']             = self._get_format_string(quality)
             opts['merge_output_format']= 'mp4'
             opts['http_headers']       = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'}
@@ -401,14 +427,16 @@ class DownloadManager:
                 title = _run_download(opts)
             except Exception as first_err:
                 err_s = str(first_err)
-                if any(x in err_s for x in ('403', 'Forbidden', 'HTTP Error', 'Sign in', 'bot')):
-                    logger.warning(f'403/bot error — retrying with web_creator client')
+                if any(x in err_s for x in ('403', 'Forbidden', 'HTTP Error', 'Please sign in', 'Sign in')):
+                    logger.warning('Auth error — retrying with OAuth2')
                     if self.progress_callback:
                         self.progress_callback({'status': 'started',
-                                                'message': 'Retrying with alternative client…'})
+                                                'message': 'Authenticating via OAuth2…'})
                     opts.pop('cookiesfrombrowser', None)
                     opts.pop('cookiefile', None)
-                    opts['extractor_args'] = {'youtube': {'player_client': ['web_creator', 'tv_embedded']}}
+                    opts.pop('extractor_args', None)
+                    opts['username'] = 'oauth2'
+                    opts['password'] = ''
                     title = _run_download(opts)
                 else:
                     raise
@@ -458,8 +486,9 @@ class DownloadManager:
             opts = dict(YT_DLP_OPTS_BASE)
             opts['outtmpl']        = out_tpl
             opts['progress_hooks'] = [self._progress_hook]
+            opts['logger']         = _YtDlpLogger(cb=self.progress_callback)
             opts['format']         = 'bestaudio/best'
-            opts['http_headers']       = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'}
+            opts['http_headers']   = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'}
             if _NODE:
                 opts['js_runtimes'] = {'node': {'path': _NODE}}
             _add_browser_cookies(opts)
@@ -481,14 +510,16 @@ class DownloadManager:
                 title = _run_audio(opts)
             except Exception as first_err:
                 err_s = str(first_err)
-                if any(x in err_s for x in ('403', 'Forbidden', 'HTTP Error', 'Sign in', 'bot')):
-                    logger.warning(f'403/bot error — retrying with web_creator client')
+                if any(x in err_s for x in ('403', 'Forbidden', 'HTTP Error', 'Please sign in', 'Sign in')):
+                    logger.warning('Auth error — retrying with OAuth2')
                     if self.progress_callback:
                         self.progress_callback({'status': 'started',
-                                                'message': 'Retrying with alternative client…'})
+                                                'message': 'Authenticating via OAuth2…'})
                     opts.pop('cookiesfrombrowser', None)
                     opts.pop('cookiefile', None)
-                    opts['extractor_args'] = {'youtube': {'player_client': ['web_creator', 'tv_embedded']}}
+                    opts.pop('extractor_args', None)
+                    opts['username'] = 'oauth2'
+                    opts['password'] = ''
                     title = _run_audio(opts)
                 else:
                     raise

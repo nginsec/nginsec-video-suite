@@ -30,6 +30,7 @@ class NginsecApp(ctk.CTk):
         self._video_info = None
         self._active_tab = ''
         self._queue_widgets: list = []
+        self._oauth2_win = None
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
@@ -626,6 +627,7 @@ class NginsecApp(ctk.CTk):
             self._cancel_btn.configure(state='normal')
 
         elif status == 'downloading':
+            self._close_oauth2_dialog()
             downloaded = d.get('downloaded_bytes', 0)
             total      = d.get('total_bytes', 0)
             speed      = d.get('speed') or 0
@@ -653,6 +655,10 @@ class NginsecApp(ctk.CTk):
                 text_color=COLORS['success'],
             )
             self._set_buttons_downloading(False)
+            self._close_oauth2_dialog()
+
+        elif status == 'oauth2_prompt':
+            self._show_oauth2_dialog(d.get('message', ''))
 
         elif status == 'error':
             self._prog_bar.set(0)
@@ -662,6 +668,20 @@ class NginsecApp(ctk.CTk):
                 text_color=COLORS['error'],
             )
             self._set_buttons_downloading(False)
+            self._close_oauth2_dialog()
+
+    def _show_oauth2_dialog(self, message: str):
+        """Show (or update) the OAuth2 setup popup when yt-dlp needs authentication."""
+        if self._oauth2_win and self._oauth2_win.winfo_exists():
+            self._oauth2_win.append(message)
+            return
+
+        self._oauth2_win = _OAuth2Dialog(self, message)
+
+    def _close_oauth2_dialog(self):
+        if self._oauth2_win and self._oauth2_win.winfo_exists():
+            self._oauth2_win.destroy()
+        self._oauth2_win = None
 
     def _set_buttons_downloading(self, downloading: bool):
         state = 'disabled' if downloading else 'normal'
@@ -800,3 +820,76 @@ class NginsecApp(ctk.CTk):
         if n >= 1_000:
             return f'{n/1e3:.1f}K'
         return str(n)
+
+
+# ── OAuth2 setup dialog ────────────────────────────────────────────────────────
+
+class _OAuth2Dialog(ctk.CTkToplevel):
+    """
+    Popup shown when YouTube requires Google authentication (first time only).
+    yt-dlp-youtube-oauth2 outputs a URL and a code — user opens the URL,
+    enters the code, and the token is cached. Future downloads need no interaction.
+    """
+
+    def __init__(self, parent, first_message: str):
+        super().__init__(parent)
+        self.title('YouTube Authentication')
+        self.geometry('520x340')
+        self.resizable(False, False)
+        self.configure(fg_color='#0d1117')
+        self.lift()
+        self.focus()
+        self.grab_set()
+        self._url = ''
+        self._build(first_message)
+
+    def _build(self, message: str):
+        ctk.CTkLabel(
+            self, text='YouTube — Bir kez giriş yapın',
+            font=('Segoe UI', 15, 'bold'), text_color='#58a6ff',
+        ).pack(pady=(22, 4))
+
+        ctk.CTkLabel(
+            self,
+            text='Token ilk kurulumdan sonra kaydedilir.\nSonraki indirmelerde hiçbir işlem gerekmez.',
+            font=('Segoe UI', 11), text_color='#8b949e', justify='center',
+        ).pack(pady=(0, 12))
+
+        self._textbox = ctk.CTkTextbox(
+            self, height=110, font=('Consolas', 11),
+            fg_color='#161b22', text_color='#c9d1d9', border_color='#30363d', border_width=1,
+            state='normal',
+        )
+        self._textbox.pack(fill='x', padx=20, pady=(0, 10))
+        self._textbox.insert('end', message + '\n')
+
+        self._open_btn = ctk.CTkButton(
+            self, text='Tarayıcıda Aç', height=34,
+            fg_color='#238636', hover_color='#2ea043',
+            command=self._open_browser,
+        )
+        self._open_btn.pack(pady=(0, 6))
+
+        ctk.CTkLabel(
+            self, text='Tarayıcıda kodu girin → bu pencere otomatik kapanır.',
+            font=('Segoe UI', 10), text_color='#8b949e',
+        ).pack()
+
+        self._parse_url(message)
+
+    def append(self, message: str):
+        self._textbox.configure(state='normal')
+        self._textbox.insert('end', message + '\n')
+        self._textbox.see('end')
+        self._parse_url(message)
+
+    def _parse_url(self, text: str):
+        import re
+        m = re.search(r'https?://\S+', text)
+        if m:
+            self._url = m.group(0)
+
+    def _open_browser(self):
+        if self._url:
+            import webbrowser
+            webbrowser.open(self._url)
