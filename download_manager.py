@@ -50,26 +50,25 @@ else:
 
 
 def _add_browser_cookies(opts: dict) -> None:
-    """Try to add browser cookies — Firefox first (no DPAPI), then Chrome, Edge."""
-    browser_paths = [
-        ('firefox', [
-            r'C:\Program Files\Mozilla Firefox\firefox.exe',
-            r'C:\Program Files (x86)\Mozilla Firefox\firefox.exe',
-        ]),
-        ('chrome', [
-            r'C:\Program Files\Google\Chrome\Application\chrome.exe',
-            r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
-        ]),
-        ('edge', [
-            r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
-            r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
-        ]),
+    """Add Chrome cookies (most common browser, user has it open)."""
+    chrome_paths = [
+        r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+        r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+        os.path.expanduser(r'~\AppData\Local\Google\Chrome\Application\chrome.exe'),
     ]
-    for browser, paths in browser_paths:
-        if any(os.path.exists(p) for p in paths):
-            opts['cookiesfrombrowser'] = (browser,)
-            logger.info(f'Using {browser} cookies')
-            return
+    if any(os.path.exists(p) for p in chrome_paths):
+        opts['cookiesfrombrowser'] = ('chrome',)
+        logger.info('Using Chrome cookies')
+        return
+    opera_paths = [
+        os.path.expanduser(r'~\AppData\Local\Programs\Opera\opera.exe'),
+        os.path.expanduser(r'~\AppData\Local\Programs\Opera GX\opera.exe'),
+    ]
+    if any(os.path.exists(p) for p in opera_paths):
+        opts['cookiesfrombrowser'] = ('opera',)
+        logger.info('Using Opera cookies')
+        return
+    logger.warning('No supported browser found for cookies')
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
