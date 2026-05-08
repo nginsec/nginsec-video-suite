@@ -261,7 +261,7 @@ class DownloadManager:
             opts['merge_output_format']= 'mp4'
             opts['http_headers']       = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'}
             if _NODE:
-                opts['js_runtimes'] = f'node:{_NODE}'
+                opts['js_runtimes'] = {'node': {'path': _NODE}}
 
             # Clip extraction
             if clip_start or clip_end:
@@ -339,7 +339,7 @@ class DownloadManager:
             opts['format']         = 'bestaudio/best'
             opts['http_headers']       = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'}
             if _NODE:
-                opts['js_runtimes'] = f'node:{_NODE}'
+                opts['js_runtimes'] = {'node': {'path': _NODE}}
             opts['postprocessors'] = [{
                 'key':              'FFmpegExtractAudio',
                 'preferredcodec':   'mp3',
