@@ -1,314 +1,416 @@
 """
-Download Manager - Backend logic for yt-dlp operations
-Handles all video/audio downloads and metadata extraction
+Download Manager v2 — yt-dlp engine with history, queue, clip, subtitles, multi-platform
 """
-import os
 import json
+import sqlite3
 import logging
 import threading
 from pathlib import Path
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Tuple
 from datetime import datetime
+
 import yt_dlp
 import requests
+
 from config import (
-    DOWNLOADS_DIR, MUSIC_DIR, METADATA_DIR, TEMP_DIR,
-    AUDIO_QUALITIES, YT_DLP_OPTS_BASE, LOG_FORMAT, LOG_DATE_FORMAT
+    DOWNLOADS_DIR, MUSIC_DIR, METADATA_DIR, DB_PATH,
+    AUDIO_QUALITIES, YT_DLP_OPTS_BASE, LOG_FORMAT, LOG_DATE_FORMAT,
+    NOTIFICATION_ENABLED, DEFAULT_SUBTITLE_LANGS, SUPPORTED_PLATFORMS,
 )
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format=LOG_FORMAT,
-    datefmt=LOG_DATE_FORMAT
-)
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, datefmt=LOG_DATE_FORMAT)
 logger = logging.getLogger(__name__)
 
 
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def detect_platform(url: str) -> Tuple[str, str]:
+    """Return (platform_name, icon_class) for a URL."""
+    lower = url.lower()
+    for domain, (name, _color, icon) in SUPPORTED_PLATFORMS.items():
+        if domain in lower:
+            return name, icon
+    return 'Unknown', 'bi-globe'
+
+
+def _notify(title: str, message: str) -> None:
+    if not NOTIFICATION_ENABLED:
+        return
+    try:
+        from plyer import notification
+        notification.notify(title=title, message=message, app_name='nginsec', timeout=5)
+    except Exception:
+        pass
+
+
+def _time_to_seconds(t: str) -> float:
+    """Convert HH:MM:SS / MM:SS / raw seconds string to float."""
+    if not t or not t.strip():
+        return 0.0
+    parts = t.strip().split(':')
+    try:
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + float(parts[1])
+        return float(parts[0])
+    except (ValueError, IndexError):
+        return 0.0
+
+
+# ── History DB ─────────────────────────────────────────────────────────────────
+
+class HistoryDB:
+    """Thread-safe SQLite download history (new connection per call)."""
+
+    def __init__(self, path: Path):
+        self.path = str(path)
+        self._init_schema()
+
+    def _connect(self):
+        return sqlite3.connect(self.path)
+
+    def _init_schema(self):
+        with self._connect() as conn:
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS downloads (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url           TEXT,
+                    title         TEXT,
+                    platform      TEXT,
+                    format_type   TEXT,
+                    quality       TEXT,
+                    filepath      TEXT,
+                    status        TEXT,
+                    downloaded_at TEXT
+                )
+            ''')
+            conn.commit()
+
+    def add(self, url: str, title: str, platform: str,
+            format_type: str, quality: str, filepath: str,
+            status: str = 'complete') -> None:
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with self._connect() as conn:
+            conn.execute(
+                'INSERT INTO downloads '
+                '(url,title,platform,format_type,quality,filepath,status,downloaded_at) '
+                'VALUES (?,?,?,?,?,?,?,?)',
+                (url, title, platform, format_type, quality, filepath, status, ts),
+            )
+            conn.commit()
+
+    def get_all(self, limit: int = 300) -> List[Dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                'SELECT id,url,title,platform,format_type,quality,filepath,status,downloaded_at '
+                'FROM downloads ORDER BY downloaded_at DESC LIMIT ?',
+                (limit,),
+            ).fetchall()
+        keys = ('id', 'url', 'title', 'platform', 'format_type',
+                'quality', 'filepath', 'status', 'downloaded_at')
+        return [dict(zip(keys, row)) for row in rows]
+
+    def clear(self) -> None:
+        with self._connect() as conn:
+            conn.execute('DELETE FROM downloads')
+            conn.commit()
+
+
+# ── Download Manager ───────────────────────────────────────────────────────────
+
 class DownloadManager:
-    """Handles all YouTube video/audio downloads with thread safety"""
+    """Handles video/audio downloads with queue, history, clip extraction and subtitles."""
 
     def __init__(self, progress_callback: Optional[Callable] = None):
         self.progress_callback = progress_callback
-        self.current_download = None
         self.is_downloading = False
-        self.lock = threading.Lock()
         self.cancel_flag = False
+        self.lock = threading.Lock()
+        self.queue: List[Dict] = []
+        self.history = HistoryDB(DB_PATH)
+
+    # ── Progress hook ──────────────────────────────────────────────────────────
 
     def _progress_hook(self, d: Dict) -> None:
-        """Hook for yt-dlp progress updates"""
         if self.cancel_flag:
             raise ValueError("Download cancelled by user")
+        if not self.progress_callback:
+            return
 
         if d['status'] == 'downloading':
-            self.current_download = d
-            if self.progress_callback:
-                self.progress_callback({
-                    'status': 'downloading',
-                    'downloaded_bytes': d.get('downloaded_bytes', 0),
-                    'total_bytes': d.get('total_bytes', 0),
-                    'total_bytes_estimate': d.get('total_bytes_estimate', 0),
-                    'filename': d.get('filename', ''),
-                    'speed': d.get('speed', 0),
-                    'elapsed': d.get('elapsed', 0),
-                    'eta': d.get('eta', 0),
-                })
+            total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+            self.progress_callback({
+                'status':           'downloading',
+                'downloaded_bytes': d.get('downloaded_bytes', 0),
+                'total_bytes':      total,
+                'filename':         d.get('filename', ''),
+                'speed':            d.get('speed', 0),
+                'elapsed':          d.get('elapsed', 0),
+                'eta':              d.get('eta', 0),
+            })
         elif d['status'] == 'finished':
-            if self.progress_callback:
-                self.progress_callback({
-                    'status': 'finished',
-                    'filename': d.get('filename', '')
-                })
-        elif d['status'] == 'error':
-            if self.progress_callback:
-                self.progress_callback({
-                    'status': 'error',
-                    'error': str(d)
-                })
+            self.progress_callback({'status': 'finished', 'filename': d.get('filename', '')})
+
+    # ── Video info ─────────────────────────────────────────────────────────────
 
     def get_video_info(self, url: str) -> Optional[Dict]:
-        """Fetch video information without downloading"""
         try:
-            opts = {
-                'quiet': True,
-                'no_warnings': True,
-                'extract_flat': False,
-            }
-            with yt_dlp.YoutubeDL(opts) as ydl:
+            with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True}) as ydl:
                 info = ydl.extract_info(url, download=False)
-                return self._format_video_info(info)
+            return self._format_video_info(info)
         except Exception as e:
-            logger.error(f"Error fetching video info: {str(e)}")
+            logger.error(f"Error fetching info: {e}")
             if self.progress_callback:
-                self.progress_callback({
-                    'status': 'error',
-                    'error': f"Failed to fetch video: {str(e)}"
-                })
+                self.progress_callback({'status': 'error', 'error': str(e)})
             return None
 
     def _format_video_info(self, info: Dict) -> Dict:
-        """Format video information for display"""
-        formats = info.get('formats', [])
-
-        # Group available resolutions
-        resolutions = set()
-        for fmt in formats:
-            height = fmt.get('height')
-            if height:
-                resolutions.add(f"{height}p")
-
+        resolutions = sorted(
+            {f"{f.get('height')}p" for f in info.get('formats', []) if f.get('height')},
+            key=lambda s: int(s[:-1]), reverse=True,
+        )
+        source_url = info.get('webpage_url') or info.get('url', '')
+        platform, _ = detect_platform(source_url)
         return {
-            'title': info.get('title', 'Unknown'),
-            'duration': info.get('duration', 0),
-            'uploader': info.get('uploader', 'Unknown'),
-            'upload_date': info.get('upload_date', ''),
-            'description': info.get('description', ''),
-            'thumbnail': info.get('thumbnail', ''),
-            'view_count': info.get('view_count', 0),
-            'like_count': info.get('like_count', 0),
-            'comment_count': info.get('comment_count', 0),
-            'subtitles': list(info.get('subtitles', {}).keys()),
-            'formats_available': sorted(list(resolutions), reverse=True),
-            'is_live': info.get('is_live', False),
-            'age_limit': info.get('age_limit', 0),
+            'title':             info.get('title', 'Unknown'),
+            'duration':          info.get('duration', 0),
+            'uploader':          info.get('uploader', 'Unknown'),
+            'upload_date':       info.get('upload_date', ''),
+            'description':       info.get('description', ''),
+            'thumbnail':         info.get('thumbnail', ''),
+            'view_count':        info.get('view_count', 0),
+            'like_count':        info.get('like_count', 0),
+            'subtitles':         list(info.get('subtitles', {}).keys()),
+            'auto_captions':     list(info.get('automatic_captions', {}).keys()),
+            'formats_available': resolutions,
+            'is_live':           info.get('is_live', False),
+            'platform':          platform,
         }
 
-    def download_video(self, url: str, quality: str = "best") -> bool:
-        """Download video with specified quality"""
-        with self.lock:
-            if self.is_downloading:
-                return False
-            self.is_downloading = True
-            self.cancel_flag = False
-
-        try:
-            thread = threading.Thread(
-                target=self._download_video_thread,
-                args=(url, quality),
-                daemon=False
-            )
-            thread.start()
-            thread.join()
-            return True
-        except Exception as e:
-            logger.error(f"Error starting download: {str(e)}")
-            if self.progress_callback:
-                self.progress_callback({
-                    'status': 'error',
-                    'error': str(e)
-                })
-            return False
-        finally:
-            with self.lock:
-                self.is_downloading = False
-
-    def _download_video_thread(self, url: str, quality: str) -> None:
-        """Actual download logic running in thread"""
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_template = str(DOWNLOADS_DIR / f"{timestamp}_%(title)s.%(ext)s")
-
-            opts = YT_DLP_OPTS_BASE.copy()
-            opts['outtmpl'] = output_template
-            opts['progress_hooks'] = [self._progress_hook]
-            opts['format'] = self._get_format_string(quality)
-            opts['merge_output_format'] = 'mp4'
-
-            if self.progress_callback:
-                self.progress_callback({
-                    'status': 'started',
-                    'message': f'Starting download with quality: {quality}'
-                })
-
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                ydl.download([url])
-
-            if self.progress_callback:
-                self.progress_callback({
-                    'status': 'completed',
-                    'message': 'Video download completed successfully'
-                })
-        except Exception as e:
-            logger.error(f"Download failed: {str(e)}")
-            if self.progress_callback:
-                self.progress_callback({
-                    'status': 'error',
-                    'error': str(e)
-                })
+    # ── Format string ──────────────────────────────────────────────────────────
 
     def _get_format_string(self, quality: str) -> str:
-        """Convert quality string to yt-dlp format string"""
-        quality_mapping = {
-            "4K (2160p)": "bestvideo[height<=2160]+bestaudio/best",
+        mapping = {
+            "4K (2160p)":      "bestvideo[height<=2160]+bestaudio/best",
             "1080p (Full HD)": "bestvideo[height<=1080]+bestaudio/best",
-            "720p (HD)": "bestvideo[height<=720]+bestaudio/best",
-            "480p": "bestvideo[height<=480]+bestaudio/best",
-            "360p": "bestvideo[height<=360]+bestaudio/best",
-            "240p": "bestvideo[height<=240]+bestaudio/best",
-            "best": "bestvideo+bestaudio/best",
+            "720p (HD)":       "bestvideo[height<=720]+bestaudio/best",
+            "480p":            "bestvideo[height<=480]+bestaudio/best",
+            "360p":            "bestvideo[height<=360]+bestaudio/best",
+            "240p":            "bestvideo[height<=240]+bestaudio/best",
         }
-        return quality_mapping.get(quality, "best")
+        return mapping.get(quality, "bestvideo+bestaudio/best")
 
-    def download_audio(self, url: str, quality_kbps: int = 320) -> bool:
-        """Download audio only as MP3"""
+    # ── Download video ─────────────────────────────────────────────────────────
+
+    def download_video(self, url: str, quality: str = "1080p (Full HD)",
+                       clip_start: str = '', clip_end: str = '',
+                       embed_subs: bool = False) -> bool:
         with self.lock:
             if self.is_downloading:
                 return False
             self.is_downloading = True
             self.cancel_flag = False
+        threading.Thread(
+            target=self._video_thread,
+            args=(url, quality, clip_start, clip_end, embed_subs),
+            daemon=False,
+        ).start()
+        return True
 
+    def _video_thread(self, url: str, quality: str,
+                      clip_start: str, clip_end: str, embed_subs: bool) -> None:
+        title = 'Unknown'
         try:
-            thread = threading.Thread(
-                target=self._download_audio_thread,
-                args=(url, quality_kbps),
-                daemon=False
-            )
-            thread.start()
-            thread.join()
-            return True
-        except Exception as e:
-            logger.error(f"Error starting audio download: {str(e)}")
-            if self.progress_callback:
-                self.progress_callback({
-                    'status': 'error',
-                    'error': str(e)
+            ts      = datetime.now().strftime("%Y%m%d_%H%M%S")
+            out_tpl = str(DOWNLOADS_DIR / f"{ts}_%(title)s.%(ext)s")
+            platform, _ = detect_platform(url)
+
+            opts = dict(YT_DLP_OPTS_BASE)
+            opts['postprocessor_args'] = dict(YT_DLP_OPTS_BASE.get('postprocessor_args', {}))
+            opts['outtmpl']            = out_tpl
+            opts['progress_hooks']     = [self._progress_hook]
+            opts['format']             = self._get_format_string(quality)
+            opts['merge_output_format']= 'mp4'
+
+            # Clip extraction
+            if clip_start or clip_end:
+                from yt_dlp.utils import download_range_func
+                s = _time_to_seconds(clip_start)
+                e = _time_to_seconds(clip_end)
+                if e > s:
+                    opts['download_ranges']        = download_range_func(None, [(s, e)])
+                    opts['force_keyframes_at_cuts'] = True
+
+            # Subtitle embedding
+            if embed_subs:
+                opts['writesubtitles']    = True
+                opts['writeautomaticsub'] = True
+                opts['subtitleslangs']    = DEFAULT_SUBTITLE_LANGS
+                opts['embedsubtitles']    = True
+                opts.setdefault('postprocessors', [])
+                opts['postprocessors'].append({
+                    'key': 'FFmpegEmbedSubtitle',
+                    'already_have_subtitle': False,
                 })
-            return False
+
+            if self.progress_callback:
+                self.progress_callback({'status': 'started', 'message': f'Downloading {quality}…'})
+
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info  = ydl.extract_info(url, download=True)
+                title = (info or {}).get('title', 'Unknown')
+
+            candidates = sorted(
+                [f for f in DOWNLOADS_DIR.iterdir()
+                 if f.name.startswith(ts) and f.suffix != '.part'],
+                key=lambda f: f.stat().st_mtime, reverse=True,
+            )
+            filepath = str(candidates[0]) if candidates else ''
+            self.history.add(url, title, platform, 'video', quality, filepath)
+
+            if self.progress_callback:
+                self.progress_callback({'status': 'completed', 'message': 'Video saved.'})
+            _notify('Download Complete', f'{title}')
+
+        except Exception as e:
+            logger.error(f"Video download failed: {e}")
+            if self.progress_callback:
+                self.progress_callback({'status': 'error', 'error': str(e)})
         finally:
             with self.lock:
                 self.is_downloading = False
 
-    def _download_audio_thread(self, url: str, quality_kbps: int) -> None:
-        """Actual audio download logic running in thread"""
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_template = str(MUSIC_DIR / f"{timestamp}_%(title)s.%(ext)s")
+    # ── Download audio ─────────────────────────────────────────────────────────
 
-            opts = YT_DLP_OPTS_BASE.copy()
-            opts['outtmpl'] = output_template
+    def download_audio(self, url: str, quality_kbps: int = 320) -> bool:
+        with self.lock:
+            if self.is_downloading:
+                return False
+            self.is_downloading = True
+            self.cancel_flag = False
+        threading.Thread(
+            target=self._audio_thread,
+            args=(url, quality_kbps),
+            daemon=False,
+        ).start()
+        return True
+
+    def _audio_thread(self, url: str, quality_kbps: int) -> None:
+        title = 'Unknown'
+        try:
+            ts      = datetime.now().strftime("%Y%m%d_%H%M%S")
+            out_tpl = str(MUSIC_DIR / f"{ts}_%(title)s.%(ext)s")
+            platform, _ = detect_platform(url)
+
+            opts = dict(YT_DLP_OPTS_BASE)
+            opts['outtmpl']        = out_tpl
             opts['progress_hooks'] = [self._progress_hook]
-            opts['format'] = 'bestaudio/best'
-            opts['postprocessors'] = [
-                {
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': str(quality_kbps),
-                }
-            ]
+            opts['format']         = 'bestaudio/best'
+            opts['postprocessors'] = [{
+                'key':              'FFmpegExtractAudio',
+                'preferredcodec':   'mp3',
+                'preferredquality': str(quality_kbps),
+            }]
 
             if self.progress_callback:
-                self.progress_callback({
-                    'status': 'started',
-                    'message': f'Starting audio extraction: {quality_kbps}kbps MP3'
-                })
+                self.progress_callback({'status': 'started', 'message': f'Extracting MP3 {quality_kbps}kbps…'})
 
             with yt_dlp.YoutubeDL(opts) as ydl:
-                ydl.download([url])
+                info  = ydl.extract_info(url, download=True)
+                title = (info or {}).get('title', 'Unknown')
+
+            candidates = sorted(
+                [f for f in MUSIC_DIR.iterdir()
+                 if f.name.startswith(ts) and f.suffix != '.part'],
+                key=lambda f: f.stat().st_mtime, reverse=True,
+            )
+            filepath = str(candidates[0]) if candidates else ''
+            self.history.add(url, title, platform, 'audio', f'{quality_kbps} kbps MP3', filepath)
 
             if self.progress_callback:
-                self.progress_callback({
-                    'status': 'completed',
-                    'message': 'Audio download completed successfully'
-                })
+                self.progress_callback({'status': 'completed', 'message': 'Audio saved.'})
+            _notify('Audio Ready', f'{title}.mp3')
+
         except Exception as e:
-            logger.error(f"Audio download failed: {str(e)}")
+            logger.error(f"Audio download failed: {e}")
             if self.progress_callback:
-                self.progress_callback({
-                    'status': 'error',
-                    'error': str(e)
-                })
+                self.progress_callback({'status': 'error', 'error': str(e)})
+        finally:
+            with self.lock:
+                self.is_downloading = False
+
+    # ── Metadata ───────────────────────────────────────────────────────────────
 
     def download_metadata(self, url: str, video_title: str) -> bool:
-        """Download video metadata (description, thumbnail, subtitles, tags)"""
         try:
             info = self.get_video_info(url)
             if not info:
                 return False
+            safe = "".join(c for c in video_title
+                           if c.isalnum() or c in (' ', '-', '_')).rstrip() or 'unknown'
+            out = METADATA_DIR / safe
+            out.mkdir(parents=True, exist_ok=True)
 
-            # Create metadata directory for this video
-            safe_title = "".join(c for c in video_title if c.isalnum() or c in (' ', '-', '_')).rstrip()
-            metadata_path = METADATA_DIR / safe_title
-            metadata_path.mkdir(parents=True, exist_ok=True)
-
-            # Save description
             if info.get('description'):
-                with open(metadata_path / "description.txt", 'w', encoding='utf-8') as f:
-                    f.write(info['description'])
+                (out / 'description.txt').write_text(info['description'], encoding='utf-8')
 
-            # Download thumbnail
             if info.get('thumbnail'):
                 try:
-                    response = requests.get(info['thumbnail'], timeout=10)
-                    if response.status_code == 200:
-                        with open(metadata_path / "thumbnail.jpg", 'wb') as f:
-                            f.write(response.content)
+                    r = requests.get(info['thumbnail'], timeout=10)
+                    if r.status_code == 200:
+                        (out / 'thumbnail.jpg').write_bytes(r.content)
                 except Exception as e:
-                    logger.warning(f"Failed to download thumbnail: {str(e)}")
+                    logger.warning(f"Thumbnail failed: {e}")
 
-            # Save metadata as JSON
-            metadata = {
-                'title': info.get('title'),
-                'uploader': info.get('uploader'),
-                'upload_date': info.get('upload_date'),
-                'duration': info.get('duration'),
-                'view_count': info.get('view_count'),
-                'like_count': info.get('like_count'),
-                'comment_count': info.get('comment_count'),
-                'subtitles_available': info.get('subtitles', []),
-                'formats_available': info.get('formats_available', []),
-            }
-
-            with open(metadata_path / "metadata.json", 'w', encoding='utf-8') as f:
-                json.dump(metadata, f, indent=2, ensure_ascii=False)
-
-            logger.info(f"Metadata saved to {metadata_path}")
+            (out / 'metadata.json').write_text(
+                json.dumps(
+                    {k: info[k] for k in ('title', 'uploader', 'upload_date',
+                                          'duration', 'view_count', 'like_count')
+                     if k in info},
+                    indent=2, ensure_ascii=False,
+                ),
+                encoding='utf-8',
+            )
             return True
         except Exception as e:
-            logger.error(f"Error downloading metadata: {str(e)}")
+            logger.error(f"Metadata failed: {e}")
             return False
 
+    # ── Queue ──────────────────────────────────────────────────────────────────
+
+    def add_to_queue(self, url: str, mode: str, quality: str) -> None:
+        """mode: 'video' | 'audio'"""
+        self.queue.append({'url': url, 'mode': mode, 'quality': quality})
+
+    def remove_from_queue(self, index: int) -> None:
+        if 0 <= index < len(self.queue):
+            self.queue.pop(index)
+
+    def clear_queue(self) -> None:
+        self.queue.clear()
+
+    def process_queue(self, done_callback: Optional[Callable] = None) -> None:
+        """Process queue items sequentially in a background thread."""
+        def _run():
+            for item in list(self.queue):
+                self.queue.remove(item)
+                if item['mode'] == 'audio':
+                    kbps = AUDIO_QUALITIES.get(item['quality'], 320)
+                    self.download_audio(item['url'], kbps)
+                else:
+                    self.download_video(item['url'], item['quality'])
+                # Wait for current download to finish
+                while self.is_downloading:
+                    import time; time.sleep(0.3)
+            if done_callback:
+                done_callback()
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    # ── Cancel ─────────────────────────────────────────────────────────────────
+
     def cancel_download(self) -> None:
-        """Cancel the current download"""
         self.cancel_flag = True
         with self.lock:
             self.is_downloading = False
